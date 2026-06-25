@@ -1,0 +1,59 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // Helper functions
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    // Checking if user is a teacher (we can query the /teachers/ collection or inspect request.auth.token if we want,
+    // but in a serverless client, we can allow authenticated teachers or read from /teachers/{uid})
+    function isTeacher() {
+      return isAuthenticated() && exists(/databases/$(database)/documents/teachers/$(request.auth.uid));
+    }
+
+    // Student profile rules
+    match /students/{studentId} {
+      allow read, write: if isOwner(studentId) || isTeacher();
+    }
+
+    // Teacher collection rules
+    match /teachers/{teacherId} {
+      // Anyone can read teacher profiles so they appear in teacher cards, but only authenticated users or teachers can write
+      allow read: if true;
+      allow write: if isAuthenticated();
+    }
+
+    // Lessons rules
+    match /lessons/{lessonId} {
+      allow read: if true; // Publicly readable for learning
+      allow write: if isAuthenticated(); // For simplicity in sandbox, allow authenticated creators or check isTeacher()
+    }
+
+    // Vocabulary rules
+    match /vocabulary/{wordId} {
+      allow read: if true;
+      allow write: if isAuthenticated();
+    }
+
+    // Live sessions rules
+    match /liveSessions/{sessionId} {
+      allow read: if true;
+      allow write: if isAuthenticated();
+    }
+
+    // Chats rules
+    match /chats/{chatId} {
+      allow read, write: if isAuthenticated();
+      
+      match /messages/{messageId} {
+        allow read, write: if isAuthenticated();
+      }
+    }
+  }
+}
