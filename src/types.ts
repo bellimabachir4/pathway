@@ -67,7 +67,7 @@ export interface Lesson {
   id: string;
   title: string;
   titleAr: string;
-  category: "grammar" | "vocabulary" | "reading" | "writing" | "listening" | "speaking" | "pronunciation";
+  category: "grammar" | "reading" | "writing" | "listening" | "speaking" | "shadowing";
   level: "A1" | "A2" | "B1" | "B2" | "C1" | "C2";
   content: string; // Markdown English
   contentAr: string; // Markdown Arabic
@@ -77,6 +77,7 @@ export interface Lesson {
   imageUrl?: string;
   order?: number;
   attachedLinks?: { title: string; url: string; }[];
+  isHidden?: boolean;
 }
 
 export interface Vocabulary {
@@ -92,6 +93,16 @@ export interface Vocabulary {
   partOfSpeech?: string;
   pronunciation?: string;
   exampleAr?: string;
+  isHidden?: boolean;
+}
+
+export interface DynamicVocabCategory {
+  id: string;
+  en: string;
+  ar: string;
+  level: "A1" | "A2" | "B1" | "B2" | "C1" | "C2";
+  imageUrl?: string;
+  order: number;
 }
 
 export interface LiveSession {
@@ -156,6 +167,7 @@ export interface TrainingTopic {
   order: number; // For priority ordering
   createdAt: string;
   type?: "speaking" | "writing" | "question";
+  isHidden?: boolean;
 }
 
 export interface TrainingQuestion {
@@ -194,6 +206,21 @@ export interface LibraryBook {
   options: string[]; // exactly 4 options
   correctOptionIndex: number; // 0-3
   createdAt: string;
+}
+
+export interface TrainingAttempt {
+  id: string;
+  studentId: string;
+  type: "writing" | "speaking";
+  promptText: string;
+  studentAnswer: string;
+  score: number; // 0-100
+  accuracyRate: number; // 0-100
+  errorCount: number;
+  mostFrequentErrors: string[];
+  performanceLevel: string;
+  createdAt: string; // ISO date
+  report: any; // Entire structured feedback JSON
 }
 
 

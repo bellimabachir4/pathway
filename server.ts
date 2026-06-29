@@ -31,7 +31,6 @@ async function startServer() {
         return res.status(400).json({ error: "Messages array is required." });
       }
 
-      // We will take up to the last 15 messages for context
       const chatContext = messages.slice(-15).map((m: any) => {
         const role = m.senderRole === "student" ? "user" : "model";
         return {
@@ -72,83 +71,189 @@ Your goals:
     }
   });
 
-  // API Route: AI Vocabulary Generator
-  app.post("/api/generate-vocab", async (req, res) => {
+  // API Route: AI Writing Analyzer
+  app.post("/api/analyze-writing", async (req, res) => {
     try {
-      const { category, level, existingWordsCount = 0 } = req.body;
+      const { essayText, promptText, studentLevel } = req.body;
 
-      if (!category || !level) {
-        return res.status(400).json({ error: "Category and level are required." });
+      if (!essayText) {
+        return res.status(400).json({ error: "Essay text is required." });
       }
 
-      const prompt = `You are an expert curriculum designer and lexicographer specialized in English language learning for CEFR levels A1 and A2.
-Generate a list of exactly 15 high-quality, real English vocabulary words or phrases appropriate for CEFR level ${level} in the category of "${category}".
-Make sure these are real, useful words or expressions that are highly standard and accurate for level ${level}.
-Since the student already has ${existingWordsCount} words in this category, try to generate new, interesting, and complementary words.
+      const prompt = `You are a strict and professional CEFR English examiner and professional native proofreader.
+Analyze the student's essay text in detail based on their target level: ${studentLevel || "B1"}.
+The prompt they were writing about was: "${promptText || "General writing task"}".
+The essay written by the student is:
+"""
+${essayText}
+"""
 
-For each word/phrase, provide:
-1. word: The English word or phrase (capitalized, e.g., "Good morning", "Apple").
-2. translation: The natural Arabic translation/meaning.
-3. partOfSpeech: The part of speech in English (e.g., "Noun", "Verb", "Adjective", "Expression", "Phrasal Verb", "Idiom", "Preposition", "Conjunction").
-4. pronunciation: Phonetic spelling in IPA format (e.g. /ɡʊd ˈmɔːrnɪŋ/, /ˈæpəl/).
-5. example: A simple, natural English example sentence demonstrating correct usage for a student at level ${level}.
-6. exampleAr: A clear, natural Arabic translation of the example sentence.
+You MUST identify and correct ALL mistakes, no matter how small, including grammar, spelling, punctuation, sentence structure, word order, tenses, articles, prepositions, natural English phrasing, repeated words, formal vs informal registers, collocations, idioms, and academic tone. Do NOT be lenient or ignore any errors!
 
-Your response MUST be a valid JSON array only, conforming exactly to this structure:
-[
-  {
-    "word": "word string",
-    "translation": "translation string",
-    "partOfSpeech": "partOfSpeech string",
-    "pronunciation": "pronunciation string",
-    "example": "example string",
-    "exampleAr": "exampleAr string"
-  }
-]
+For each error, you MUST specify:
+- location (approximate position or context)
+- errorText (the incorrect word or phrase)
+- type of error (must be one of: Grammar, Vocabulary, Spelling, Punctuation, Sentence Structure, Word Order, Tenses, Articles, Prepositions, Natural English, Repeated Words, Formal vs Informal English, Collocations, Idioms, Academic Writing)
+- reason for the error (explain in Arabic)
+- correction (the correct spelling or grammar word/phrase)
+- explanation of the grammatical/lexical rule (in Arabic)
+- similarExample (English sentence with Arabic translation showcasing the correct rule)
 
-CRITICAL: Return ONLY the raw JSON array. Do NOT wrap it in any markdown code blocks, do not write 'json' or any introductory or concluding text. Just return the valid JSON array starting with [ and ending with ].`;
+In addition, provide:
+1. Overall Evaluation (التقييم العام) in Arabic
+2. Writing Score (درجة الكتابة) from 0 to 100 based strictly on quality (be rigorous!)
+3. Strengths (نقاط القوة) (minimum of 3 points, in Arabic)
+4. Weaknesses (نقاط الضعف) (minimum of 3 points, in Arabic)
+5. Suggested new vocabulary words to elevate their writing (at least 4 words/phrases, formatted as "English word (Arabic meaning)")
+6. The fully corrected version of their essay with all errors resolved.
+7. A highly professional/academic version of their essay rewritten at a higher, natural native level.
+8. Custom improvement tips (نصائح مخصصة) (at least 3 points, in Arabic).
 
-      // Call Gemini API
+You MUST respond with a single, valid JSON object conforming exactly to this structure:
+{
+  "overallEvaluation": "string",
+  "score": number,
+  "strengths": ["string", "string", ...],
+  "weaknesses": ["string", "string", ...],
+  "suggestedWords": ["string", "string", ...],
+  "correctedVersion": "string",
+  "professionalVersion": "string",
+  "tips": ["string", "string", ...],
+  "errors": [
+    {
+      "errorText": "string",
+      "location": "string",
+      "type": "string",
+      "reason": "string",
+      "correction": "string",
+      "explanation": "string",
+      "similarExample": "string"
+    }
+  ]
+}
+
+CRITICAL: Return ONLY raw, valid JSON. No markdown backticks, no text wrapping!`;
+
       const result = await ai.models.generateContent({
         model: "gemini-3.5-flash",
         contents: [{ role: "user", parts: [{ text: prompt }] }],
         config: {
-          temperature: 0.8,
-          maxOutputTokens: 2048,
+          temperature: 0.2, // low temperature for precise JSON correction
+          maxOutputTokens: 2548,
         },
       });
 
-      let responseText = result.text || "[]";
-      // Clean up potential markdown formatting if returned
+      let responseText = result.text || "{}";
       responseText = responseText.trim();
       if (responseText.startsWith("```")) {
-        // Strip markdown backticks
         responseText = responseText.replace(/^```json\s*/i, "").replace(/^```\s*/, "").replace(/\s*```$/, "");
       }
       responseText = responseText.trim();
 
-      try {
-        const parsedWords = JSON.parse(responseText);
-        res.json({ success: true, words: parsedWords });
-      } catch (jsonErr) {
-        console.error("Failed to parse Gemini vocabulary JSON. Response was:", responseText, jsonErr);
-        // Fallback: search for JSON bracket inside responseText
-        const startIdx = responseText.indexOf("[");
-        const endIdx = responseText.lastIndexOf("]");
-        if (startIdx !== -1 && endIdx !== -1 && endIdx > startIdx) {
-          try {
-            const cleanText = responseText.substring(startIdx, endIdx + 1);
-            const parsedWords = JSON.parse(cleanText);
-            return res.json({ success: true, words: parsedWords });
-          } catch (secondErr) {
-            console.error("Second attempt to parse JSON failed", secondErr);
-          }
-        }
-        res.status(500).json({ error: "AI generated invalid JSON structure. Please try again." });
-      }
+      const parsedReport = JSON.parse(responseText);
+      res.json({ success: true, report: parsedReport });
     } catch (error: any) {
-      console.error("Gemini Vocabulary Generator API Error:", error);
-      res.status(500).json({ error: "Failed to generate vocabulary. " + (error.message || "") });
+      console.error("Gemini Writing Analyzer Error:", error);
+      res.status(500).json({ error: "Failed to analyze writing. " + (error.message || "") });
+    }
+  });
+
+  // API Route: AI Speaking Analyzer
+  app.post("/api/analyze-speaking", async (req, res) => {
+    try {
+      const { transcript, promptText, studentLevel } = req.body;
+
+      if (!transcript) {
+        return res.status(400).json({ error: "Transcript is required." });
+      }
+
+      const prompt = `You are a professional CEFR speech examiner and phonetician.
+Analyze the student's transcribed speech response in detail based on their target level: ${studentLevel || "B1"}.
+The prompt/question they responded to was: "${promptText || "General speaking task"}".
+The student's transcribed speech is:
+"""
+${transcript}
+"""
+
+Analyze Pronunciation, Fluency, Grammar, Vocabulary, Intonation, Stress, Rhythm, Speaking Speed, and Clarity.
+Identify mispronounced words, unclear letters, hesitation parts, long pauses, repeated words, grammar errors, incorrectly used words, and unnatural sentences.
+
+For each error, provide:
+- Approximate time inside the audio (e.g., "0:04", "0:08" etc.)
+- Original spoken error
+- Correct word/phrase
+- Correct IPA/phonetic pronunciation
+- Reason for the error (in Arabic)
+- Method of improvement (طريقة التحسين) (in Arabic)
+
+In addition, provide:
+1. Overall speaking score from 0 to 100
+2. Separate sub-scores (0-100) for metrics: pronunciation, fluency, grammar, vocabulary, intonation, stress, rhythm, speakingSpeed, clarity
+3. Fully corrected version of what they said.
+4. A highly natural, professional native-equivalent version of their response.
+5. Review words: key words from their response that need practice, with their correct IPA/phonetic representation and Arabic meaning.
+6. A personalized training plan (خطة تدريب شخصية) in Arabic based on their specific errors (at least 4 actionable exercises or areas to focus on).
+
+You MUST respond with a single, valid JSON object conforming exactly to this structure:
+{
+  "overall": number,
+  "metrics": {
+    "pronunciation": number,
+    "fluency": number,
+    "grammar": number,
+    "vocabulary": number,
+    "intonation": number,
+    "stress": number,
+    "rhythm": number,
+    "speakingSpeed": number,
+    "clarity": number
+  },
+  "errors": [
+    {
+      "time": "string",
+      "errorText": "string",
+      "correction": "string",
+      "pronunciationIPA": "string",
+      "reason": "string",
+      "improvementMethod": "string"
+    }
+  ],
+  "transcript": "string",
+  "correctedVersion": "string",
+  "professionalVersion": "string",
+  "reviewWords": [
+    {
+      "word": "string",
+      "ipa": "string",
+      "meaningAr": "string"
+    }
+  ],
+  "trainingPlan": "string"
+}
+
+CRITICAL: Return ONLY raw, valid JSON. No markdown backticks, no text wrapping!`;
+
+      const result = await ai.models.generateContent({
+        model: "gemini-3.5-flash",
+        contents: [{ role: "user", parts: [{ text: prompt }] }],
+        config: {
+          temperature: 0.2, // low temperature for precise phonetic/syntactic evaluation JSON
+          maxOutputTokens: 2548,
+        },
+      });
+
+      let responseText = result.text || "{}";
+      responseText = responseText.trim();
+      if (responseText.startsWith("```")) {
+        responseText = responseText.replace(/^```json\s*/i, "").replace(/^```\s*/, "").replace(/\s*```$/, "");
+      }
+      responseText = responseText.trim();
+
+      const parsedReport = JSON.parse(responseText);
+      res.json({ success: true, report: parsedReport });
+    } catch (error: any) {
+      console.error("Gemini Speaking Analyzer Error:", error);
+      res.status(500).json({ error: "Failed to analyze speech. " + (error.message || "") });
     }
   });
 

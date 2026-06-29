@@ -16,7 +16,7 @@ import TipsSection from "./components/TipsSection";
 import TrainingSection from "./components/TrainingSection";
 import RecordedLessonsSection from "./components/RecordedLessonsSection";
 
-import { Student, Teacher, Lesson, Vocabulary, LiveSession, Announcement, ResourceOrTip } from "./types";
+import { Student, Teacher, Lesson, Vocabulary, DynamicVocabCategory, LiveSession, Announcement, ResourceOrTip } from "./types";
 import { 
   getLessons, 
   getVocabulary, 
@@ -29,6 +29,7 @@ import {
   subscribeToResourcesAndTips,
   subscribeToLessons,
   subscribeToVocabulary,
+  subscribeToVocabCategories,
   subscribeToLiveSessions,
   subscribeToAnnouncements
 } from "./lib/dbService";
@@ -80,6 +81,7 @@ export default function App() {
   // Core curriculum lists (Lessons, vocabulary words, live video links)
   const [lessons, setLessons] = useState<Lesson[]>([]);
   const [vocabulary, setVocabulary] = useState<Vocabulary[]>([]);
+  const [vocabCategories, setVocabCategories] = useState<DynamicVocabCategory[]>([]);
   const [liveSessions, setLiveSessions] = useState<LiveSession[]>([]);
   const [announcements, setAnnouncements] = useState<Announcement[]>([]);
   const [resourcesAndTips, setResourcesAndTips] = useState<ResourceOrTip[]>([]);
@@ -120,6 +122,10 @@ export default function App() {
       setVocabulary(list);
     }, activeTeacherId);
 
+    const unsubVocabCategories = subscribeToVocabCategories((list) => {
+      setVocabCategories(list);
+    }, activeTeacherId);
+
     const unsubLives = subscribeToLiveSessions((list) => {
       setLiveSessions(list);
     }, activeTeacherId);
@@ -132,6 +138,7 @@ export default function App() {
       unsubResources();
       unsubLessons();
       unsubVocab();
+      unsubVocabCategories();
       unsubLives();
       unsubAnnouncements();
     };
@@ -535,14 +542,34 @@ export default function App() {
 
                 {/* Progressive stats bar */}
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-4 sm:gap-6">
-                  {/* progres */}
-                  <div className="bg-slate-50 rounded-2xl p-4 text-center border border-slate-100">
-                    <span className="text-2xl font-black font-display text-indigo-600 font-mono">
-                      {student.progress}%
-                    </span>
-                    <p className="text-[11px] text-slate-400 font-bold uppercase tracking-wider mt-1">
-                      {isArabic ? "نسبة التقدم الكلي" : "Completion Ratio"}
-                    </p>
+                  {/* unified study session & time remaining box */}
+                  <div className="bg-gradient-to-br from-indigo-50/80 to-slate-50 border border-indigo-100 rounded-2xl p-4 flex flex-col justify-center text-left rtl:text-right shadow-xs relative overflow-hidden">
+                    <div className="absolute top-0 right-0 w-16 h-16 bg-indigo-500/5 rounded-full blur-lg pointer-events-none" />
+                    
+                    <div className="space-y-3">
+                      {/* Section 1: Study Session */}
+                      <div className="flex items-center justify-between border-b border-slate-100 pb-2">
+                        <div className="space-y-0.5">
+                          <p className="text-[10px] text-slate-400 font-extrabold uppercase tracking-wider">
+                            {isArabic ? "جلسة المذاكرة الحالية" : "Current Session"}
+                          </p>
+                          <span className={`text-sm font-extrabold font-mono transition-all ${isStudying ? "text-indigo-600 animate-pulse" : "text-slate-500"}`}>
+                            {isStudying ? formatDuration(studyElapsedSeconds) : (isArabic ? "غير نشطة" : "Inactive")}
+                          </span>
+                        </div>
+                        <div className={`w-2 h-2 rounded-full ${isStudying ? "bg-emerald-500 animate-pulse" : "bg-slate-300"}`} />
+                      </div>
+
+                      {/* Section 2: Time Remaining */}
+                      <div className="space-y-0.5">
+                        <p className="text-[10px] text-slate-400 font-extrabold uppercase tracking-wider">
+                          {isArabic ? "الوقت المتبقي لليوم" : "Time Remaining Today"}
+                        </p>
+                        <span className="text-sm font-extrabold font-mono text-slate-700">
+                          {timeRemaining}
+                        </span>
+                      </div>
+                    </div>
                   </div>
 
                   {/* completed */}
@@ -978,15 +1005,14 @@ export default function App() {
                 </p>
               </div>
 
-              <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-4">
+              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4">
                 {[
                   { id: "grammar", labelAr: "القواعد", labelEn: "Grammar", descAr: "تراكيب وأزمنة", descEn: "Tenses & Structures", color: "bg-indigo-50 border-indigo-100 text-indigo-700" },
-                  { id: "vocabulary", labelAr: "المفردات", labelEn: "Vocabulary", descAr: "ثروة لغوية متكاملة", descEn: "Rich expressions", color: "bg-teal-50 border-teal-100 text-teal-700" },
                   { id: "reading", labelAr: "القراءة", labelEn: "Reading", descAr: "فهم واستيعاب نصوص", descEn: "Text comprehension", color: "bg-amber-50 border-amber-100 text-amber-700" },
                   { id: "writing", labelAr: "الكتابة", labelEn: "Writing", descAr: "صياغة جمل وفقرات", descEn: "Drafting essays", color: "bg-pink-50 border-pink-100 text-pink-700" },
                   { id: "listening", labelAr: "الاستماع", labelEn: "Listening", descAr: "فهم اللهجات واللكنات", descEn: "Accents training", color: "bg-purple-50 border-purple-100 text-purple-700" },
                   { id: "speaking", labelAr: "المحادثة", labelEn: "Speaking", descAr: "طلاقة وممارسة يومية", descEn: "Fluent talk", color: "bg-sky-50 border-sky-100 text-sky-700" },
-                  { id: "pronunciation", labelAr: "النطق السليم", labelEn: "Pronunciation", descAr: "مخارج الحروف الصحيحة", descEn: "Phonetic sounds", color: "bg-emerald-50 border-emerald-100 text-emerald-700" },
+                  { id: "shadowing", labelAr: "Shadowing", labelEn: "Shadowing", descAr: "محاكاة النطق الطبيعي", descEn: "Speech shadowing", color: "bg-emerald-50 border-emerald-100 text-emerald-700" },
                 ].map((item) => (
                   <button
                     key={item.id}
@@ -1037,6 +1063,7 @@ export default function App() {
           >
             <VocabularySection
               vocabulary={vocabulary}
+              vocabCategories={vocabCategories}
               student={student}
               onUpdateStudent={handleUpdateStudent}
               onOpenAuth={() => setShowAuthModal(true)}
@@ -1094,6 +1121,7 @@ export default function App() {
               onSelectTeacher={handleSelectTeacher}
               lessons={lessons}
               vocabulary={vocabulary}
+              vocabCategories={vocabCategories}
               liveSessions={liveSessions}
               onRefreshData={fetchCurriculumData}
               isArabic={isArabic}

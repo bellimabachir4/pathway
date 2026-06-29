@@ -42,7 +42,9 @@ import {
   ChevronDown,
   Palette,
   Calendar,
-  Clock
+  Clock,
+  Eye,
+  EyeOff
 } from "lucide-react";
 
 interface TrainingAdminProps {
@@ -1376,6 +1378,22 @@ export default function TrainingAdmin({ isArabic, currentTeacher }: TrainingAdmi
                       </div>
 
                       <div className="flex items-center gap-1 shrink-0">
+                        <button
+                          onClick={async (e) => {
+                            e.stopPropagation();
+                            const updated = { ...topic, isHidden: !topic.isHidden };
+                            await saveTrainingTopic(updated, currentTeacher?.uid);
+                            setTopics(prev => prev.map(t => t.id === topic.id ? updated : t));
+                          }}
+                          className={`p-1.5 rounded-lg border border-transparent hover:border-slate-200 transition-all cursor-pointer ${
+                            topic.isHidden 
+                              ? "text-amber-600 bg-amber-50 hover:bg-amber-100/50" 
+                              : "text-slate-400 hover:text-indigo-600 hover:bg-white"
+                          }`}
+                          title={topic.isHidden ? (isArabic ? "إظهار للطلاب" : "Show to Students") : (isArabic ? "إخفاء عن الطلاب" : "Hide from Students")}
+                        >
+                          {topic.isHidden ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                        </button>
                         <button
                           onClick={(e) => {
                             e.stopPropagation();

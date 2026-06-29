@@ -4,6 +4,7 @@ import {
   Student, 
   Lesson, 
   Vocabulary, 
+  DynamicVocabCategory,
   LiveSession,
   ChatMessage,
   ResourceOrTip,
@@ -19,6 +20,8 @@ import {
   deleteLesson, 
   saveVocabulary, 
   deleteVocabulary,
+  saveVocabCategory,
+  deleteVocabCategory,
   saveLiveSession,
   deleteLiveSession,
   subscribeToStudents,
@@ -65,7 +68,9 @@ import {
   ExternalLink,
   Search,
   Gamepad2,
-  PlayCircle
+  PlayCircle,
+  Eye,
+  EyeOff
 } from "lucide-react";
 
 interface TeacherDashboardProps {
@@ -73,6 +78,7 @@ interface TeacherDashboardProps {
   onSelectTeacher: (teacher: Teacher | null) => void;
   lessons: Lesson[];
   vocabulary: Vocabulary[];
+  vocabCategories: DynamicVocabCategory[];
   liveSessions: LiveSession[];
   onRefreshData: () => void;
   isArabic: boolean;
@@ -83,6 +89,7 @@ export default function TeacherDashboard({
   onSelectTeacher,
   lessons,
   vocabulary,
+  vocabCategories,
   liveSessions,
   onRefreshData,
   isArabic,
@@ -175,6 +182,17 @@ export default function TeacherDashboard({
   const [studentTeacherFilter, setStudentTeacherFilter] = useState("All");
   const [studentEditLoading, setStudentEditLoading] = useState<string | null>(null);
 
+  // Teacher Management states for Admin
+  const [editingTeacher, setEditingTeacher] = useState<Teacher | null>(null);
+  const [showEditTeacherModal, setShowEditTeacherModal] = useState(false);
+  const [editTeacherForm, setEditTeacherForm] = useState({
+    name: "",
+    email: "",
+    loginCode: "",
+    specialty: "",
+    specialtyAr: ""
+  });
+
   useEffect(() => {
     if (!isAdminMode) return;
     
@@ -213,7 +231,23 @@ export default function TeacherDashboard({
     definition: "",
     definitionAr: "",
     example: "",
-    category: "daily" as any
+    exampleAr: "",
+    pronunciation: "",
+    partOfSpeech: "",
+    category: "",
+    level: "B1" as "A1" | "A2" | "B1" | "B2" | "C1" | "C2"
+  });
+
+  const [selectedVocabLevel, setSelectedVocabLevel] = useState<"A1" | "A2" | "B1" | "B2" | "C1" | "C2">("B1");
+  const [selectedSectionId, setSelectedSectionId] = useState<string>("");
+
+  const [showCategoryForm, setShowCategoryForm] = useState(false);
+  const [editCategoryId, setEditCategoryId] = useState<string | null>(null);
+  const [categoryForm, setCategoryForm] = useState({
+    en: "",
+    ar: "",
+    order: 1,
+    imageUrl: ""
   });
 
   const [showLiveForm, setShowLiveForm] = useState(false);
@@ -276,6 +310,39 @@ export default function TeacherDashboard({
       setTeachers(prev => prev.filter(t => t.uid !== teacherUid));
     } catch (e) {
       console.error(e);
+    }
+  };
+
+  const handleStartEditTeacher = (t: Teacher) => {
+    setEditingTeacher(t);
+    setEditTeacherForm({
+      name: t.name,
+      email: t.email,
+      loginCode: t.loginCode || "",
+      specialty: t.specialty || "",
+      specialtyAr: t.specialtyAr || ""
+    });
+    setShowEditTeacherModal(true);
+  };
+
+  const handleSaveEditTeacherSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingTeacher) return;
+    try {
+      const updated: Teacher = {
+        ...editingTeacher,
+        name: editTeacherForm.name,
+        email: editTeacherForm.email,
+        loginCode: editTeacherForm.loginCode,
+        specialty: editTeacherForm.specialty,
+        specialtyAr: editTeacherForm.specialtyAr
+      };
+      await updateTeacher(updated);
+      setTeachers(prev => prev.map(t => t.uid === updated.uid ? updated : t));
+      setShowEditTeacherModal(false);
+      setEditingTeacher(null);
+    } catch (err) {
+      console.error("Failed to update teacher:", err);
     }
   };
 
@@ -526,7 +593,11 @@ export default function TeacherDashboard({
       definition: vocabForm.definition,
       definitionAr: vocabForm.definitionAr,
       example: vocabForm.example,
-      category: vocabForm.category,
+      exampleAr: vocabForm.exampleAr,
+      pronunciation: vocabForm.pronunciation,
+      partOfSpeech: vocabForm.partOfSpeech,
+      category: vocabForm.category || selectedSectionId,
+      level: vocabForm.level || selectedVocabLevel,
       createdAt: new Date().toISOString()
     };
 
@@ -539,7 +610,11 @@ export default function TeacherDashboard({
       definition: "",
       definitionAr: "",
       example: "",
-      category: "daily"
+      exampleAr: "",
+      pronunciation: "",
+      partOfSpeech: "",
+      category: "",
+      level: selectedVocabLevel
     });
     onRefreshData();
   };
@@ -552,7 +627,11 @@ export default function TeacherDashboard({
       definition: v.definition || "",
       definitionAr: v.definitionAr || "",
       example: v.example || "",
-      category: v.category
+      exampleAr: v.exampleAr || "",
+      pronunciation: v.pronunciation || "",
+      partOfSpeech: v.partOfSpeech || "",
+      category: v.category,
+      level: v.level || selectedVocabLevel
     });
     setShowVocabForm(true);
   };
@@ -562,6 +641,58 @@ export default function TeacherDashboard({
     if (confirm(isArabic ? "هل أنت متأكد من حذف هذه المفردة؟" : "Are you sure you want to delete this word?")) {
       await deleteVocabulary(id, currentTeacher.uid);
       onRefreshData();
+    }
+  };
+
+  const handleSaveCategorySubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!currentTeacher) return;
+    const catId = editCategoryId || `${selectedVocabLevel}_${Date.now()}`;
+    const categoryToSave: DynamicVocabCategory = {
+      id: catId,
+      en: categoryForm.en,
+      ar: categoryForm.ar,
+      level: selectedVocabLevel,
+      order: Number(categoryForm.order),
+      imageUrl: categoryForm.imageUrl
+    };
+    await saveVocabCategory(categoryToSave, currentTeacher.uid);
+    setShowCategoryForm(false);
+    setEditCategoryId(null);
+    setCategoryForm({
+      en: "",
+      ar: "",
+      order: 1,
+      imageUrl: ""
+    });
+  };
+
+  const handleEditCategoryTrigger = (cat: DynamicVocabCategory) => {
+    setEditCategoryId(cat.id);
+    setCategoryForm({
+      en: cat.en,
+      ar: cat.ar,
+      order: cat.order,
+      imageUrl: cat.imageUrl || ""
+    });
+    setShowCategoryForm(true);
+  };
+
+  const handleDeleteCategoryTrigger = async (id: string) => {
+    if (!currentTeacher) return;
+    if (confirm(isArabic ? "هل أنت متأكد من حذف هذا القسم؟ سيتم حذف هذا القسم وتصنيفه للمفردات." : "Are you sure you want to delete this section? This section will be removed from vocabulary categories.")) {
+      await deleteVocabCategory(id, currentTeacher.uid);
+    }
+  };
+
+  const handleCategoryCoverUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        setCategoryForm(prev => ({ ...prev, imageUrl: reader.result as string }));
+      };
+      reader.readAsDataURL(file);
     }
   };
 
@@ -721,13 +852,15 @@ export default function TeacherDashboard({
 
             {!showRegisterForm && (
               <div className="flex items-center gap-2 flex-wrap">
-                <button
-                  onClick={() => setShowRegisterForm(true)}
-                  className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white font-extrabold px-5 py-3 rounded-xl text-xs sm:text-sm transition-all shadow-md shadow-indigo-100 cursor-pointer"
-                >
-                  <Plus className="w-4 h-4" />
-                  <span>{isArabic ? "إضافة حساب جديد" : "Add New Account"}</span>
-                </button>
+                {isAdminMode && (
+                  <button
+                    onClick={() => setShowRegisterForm(true)}
+                    className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white font-extrabold px-5 py-3 rounded-xl text-xs sm:text-sm transition-all shadow-md shadow-indigo-100 cursor-pointer"
+                  >
+                    <Plus className="w-4 h-4" />
+                    <span>{isArabic ? "إضافة حساب جديد" : "Add New Account"}</span>
+                  </button>
+                )}
                 <button
                   onClick={() => {
                     if (isAdminMode) {
@@ -753,7 +886,7 @@ export default function TeacherDashboard({
             )}
           </div>
 
-          {showRegisterForm && (
+          {isAdminMode && showRegisterForm && (
             <div className="bg-white border border-neutral-200 rounded-3xl p-6 shadow-sm max-w-lg mx-auto animate-fade-in">
               <h4 className="text-sm font-extrabold text-neutral-900 mb-4 flex items-center gap-2">
                 <UserPlus className="w-5 h-5 text-indigo-600" />
@@ -911,6 +1044,7 @@ export default function TeacherDashboard({
                   <table className="w-full text-left rtl:text-right text-xs border-collapse">
                     <thead>
                       <tr className="bg-slate-50 border-b border-slate-200 text-slate-400 font-black uppercase tracking-wider font-mono">
+                        <th className="p-4 w-12 text-center">#</th>
                         <th className="p-4">{isArabic ? "الطالب" : "Student"}</th>
                         <th className="p-4">{isArabic ? "المستوى الحالي" : "Current Level"}</th>
                         <th className="p-4">{isArabic ? "الأستاذ المختار" : "Assigned Tutor"}</th>
@@ -931,10 +1065,14 @@ export default function TeacherDashboard({
                           
                           return matchesSearch && matchesLevel && matchesTeacher;
                         })
-                        .map((stud) => {
+                        .map((stud, sIndex) => {
                           const isEditing = studentEditLoading === stud.uid;
                           return (
                             <tr key={stud.uid} className={`hover:bg-slate-50/50 transition-colors ${stud.isDisabled ? "bg-red-50/20" : ""}`}>
+                              {/* Serial Number */}
+                              <td className="p-4 text-center font-bold text-slate-400 font-mono">
+                                {sIndex + 1}
+                              </td>
                               {/* Student Info */}
                               <td className="p-4">
                                 <div className="flex items-center gap-3">
@@ -1007,6 +1145,248 @@ export default function TeacherDashboard({
                     </tbody>
                   </table>
                 </div>
+              </div>
+            </div>
+          )}
+
+          {/* PROFESSOR MANAGEMENT PAGE FOR ADMIN */}
+          {isAdminMode && (
+            <div className="bg-white border border-slate-200 rounded-3xl p-6 shadow-sm space-y-6 animate-fade-in my-6" id="admin-professor-management-section">
+              <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-4 border-b border-slate-100">
+                <div className="text-left rtl:text-right">
+                  <span className="text-[10px] bg-indigo-50 text-indigo-700 font-black px-3 py-1 rounded-full uppercase tracking-wider inline-flex items-center gap-1.5 font-mono mb-1.5 border border-indigo-100">
+                    <ShieldCheck className="w-3.5 h-3.5" />
+                    {isArabic ? "لوحة الإشراف على الطاقم الأكاديمي" : "ACADEMIC STAFF CONTROL"}
+                  </span>
+                  <h3 className="text-lg font-black text-slate-800 font-display">
+                    {isArabic ? "إدارة شؤون الأساتذة" : "Professor & Teacher Management"}
+                  </h3>
+                  <p className="text-xs text-slate-400 mt-0.5">
+                    {isArabic 
+                      ? "تابع حسابات المعلمين المسجلين في المنصة، عدّل بياناتهم، تفعّل/أوقف صلاحيات دخولهم، أو احذف حساباتهم." 
+                      : "View and manage teacher registration accounts, edit login credentials, activate or suspend staff access."}
+                  </p>
+                </div>
+                
+                <div className="flex flex-wrap items-center gap-3">
+                  <div className="flex gap-2 text-xs font-bold font-mono text-slate-500 bg-slate-50 p-2 rounded-2xl border border-slate-100">
+                    <span>{isArabic ? "إجمالي الأساتذة:" : "Total Professors:"} <span className="text-indigo-600">{teachers.length}</span></span>
+                    <span className="text-slate-200">|</span>
+                    <span>{isArabic ? "النشطون:" : "Active:"} <span className="text-emerald-600">{teachers.filter(t => !t.isDisabled).length}</span></span>
+                  </div>
+                  
+                  <button
+                    onClick={() => {
+                      setShowRegisterForm(true);
+                      document.getElementById("teacher-dashboard-container")?.scrollIntoView({ behavior: 'smooth' });
+                    }}
+                    className="flex items-center gap-1.5 bg-indigo-600 hover:bg-indigo-700 text-white font-extrabold px-4 py-2.5 rounded-xl text-xs transition-all shadow-md shadow-indigo-100 cursor-pointer"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    <span>{isArabic ? "إضافة أستاذ جديد" : "Add Professor"}</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Professors Table */}
+              <div className="border border-slate-200 rounded-2xl overflow-hidden shadow-sm bg-white">
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left rtl:text-right text-xs border-collapse">
+                    <thead>
+                      <tr className="bg-slate-50 border-b border-slate-200 text-slate-400 font-black uppercase tracking-wider font-mono">
+                        <th className="p-4 w-12 text-center">#</th>
+                        <th className="p-4">{isArabic ? "الأستاذ" : "Professor"}</th>
+                        <th className="p-4">{isArabic ? "البريد الإلكتروني" : "Email (Gmail)"}</th>
+                        <th className="p-4">{isArabic ? "كود الدخول" : "Access Code"}</th>
+                        <th className="p-4 text-center">{isArabic ? "حالة الحساب" : "Status"}</th>
+                        <th className="p-4 text-center">{isArabic ? "العمليات" : "Actions"}</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-150">
+                      {teachers.map((prof, tIndex) => {
+                        return (
+                          <tr key={prof.uid} className={`hover:bg-slate-50/50 transition-colors ${prof.isDisabled ? "bg-amber-50/10" : ""}`}>
+                            {/* Serial Number */}
+                            <td className="p-4 text-center font-bold text-slate-450 font-mono">
+                              {tIndex + 1}
+                            </td>
+
+                            {/* Prof Info */}
+                            <td className="p-4">
+                              <div className="flex items-center gap-3">
+                                <img
+                                  src={prof.photoUrl || `https://ui-avatars.com/api/?name=${encodeURIComponent(prof.name)}&background=4f46e5&color=fff&bold=true`}
+                                  alt=""
+                                  className="w-9 h-9 rounded-xl object-cover border border-slate-100 shrink-0"
+                                  referrerPolicy="no-referrer"
+                                />
+                                <div className="min-w-0">
+                                  <span className="block font-extrabold text-slate-800 text-xs truncate">{prof.name}</span>
+                                  <span className="text-[10px] text-indigo-500 block font-semibold truncate">
+                                    {prof.specialtyAr || (isArabic ? "أستاذ لغة إنجليزية" : "English Professor")}
+                                  </span>
+                                </div>
+                              </div>
+                            </td>
+
+                            {/* Email */}
+                            <td className="p-4 font-semibold text-slate-600 font-mono">
+                              {prof.email}
+                            </td>
+
+                            {/* Login Code */}
+                            <td className="p-4 font-mono font-bold text-slate-500">
+                              {prof.loginCode || "••••••"}
+                            </td>
+
+                            {/* Status */}
+                            <td className="p-4 text-center">
+                              <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-black ${
+                                prof.isDisabled
+                                  ? "bg-amber-50 text-amber-700 border border-amber-100"
+                                  : "bg-emerald-50 text-emerald-700 border border-emerald-100"
+                              }`}>
+                                <span className={`w-1.5 h-1.5 rounded-full ${prof.isDisabled ? "bg-amber-500 animate-pulse" : "bg-emerald-500 animate-pulse"}`} />
+                                {prof.isDisabled ? (isArabic ? "موقوف مؤقتاً" : "Suspended") : (isArabic ? "نشط ومفعل" : "Active")}
+                              </span>
+                            </td>
+
+                            {/* Actions */}
+                            <td className="p-4 text-center">
+                              <div className="flex items-center justify-center gap-1.5">
+                                <button
+                                  onClick={() => handleStartEditTeacher(prof)}
+                                  className="p-1.5 text-slate-500 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg border border-transparent hover:border-indigo-100/30 transition-all cursor-pointer"
+                                  title={isArabic ? "تعديل البيانات" : "Edit Profile"}
+                                >
+                                  <Edit className="w-3.5 h-3.5" />
+                                </button>
+                                
+                                <button
+                                  onClick={() => handleToggleTeacherDisabled(prof)}
+                                  className={`p-1.5 rounded-lg border border-transparent transition-all cursor-pointer ${
+                                    prof.isDisabled
+                                      ? "text-emerald-600 hover:bg-emerald-50 hover:border-emerald-100"
+                                      : "text-amber-600 hover:bg-amber-50 hover:border-amber-100"
+                                  }`}
+                                  title={prof.isDisabled ? (isArabic ? "تنشيط الحساب" : "Activate") : (isArabic ? "إيقاف الحساب" : "Suspend")}
+                                >
+                                  {prof.isDisabled ? <Check className="w-3.5 h-3.5" /> : <EyeOff className="w-3.5 h-3.5" />}
+                                </button>
+
+                                <button
+                                  onClick={() => handleDeleteTeacherAccount(prof.uid)}
+                                  className="p-1.5 text-slate-500 hover:text-rose-600 hover:bg-rose-50 rounded-lg border border-transparent hover:border-slate-200 transition-all cursor-pointer"
+                                  title={isArabic ? "حذف الحساب" : "Delete Account"}
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* EDIT TEACHER MODAL */}
+          {showEditTeacherModal && editingTeacher && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-4 animate-fade-in" id="edit-teacher-modal">
+              <div className="bg-white border border-slate-200 rounded-3xl p-6 shadow-2xl max-w-md w-full relative">
+                <h4 className="text-sm font-black text-slate-900 mb-4 flex items-center gap-2 border-b border-slate-100 pb-3">
+                  <UserPlus className="w-5 h-5 text-indigo-600" />
+                  <span>{isArabic ? `تعديل بيانات الأستاذ: ${editingTeacher.name}` : `Edit Teacher: ${editingTeacher.name}`}</span>
+                </h4>
+
+                <form onSubmit={handleSaveEditTeacherSubmit} className="space-y-4">
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-600 mb-1.5">
+                      {isArabic ? "اسم الأستاذ:" : "Full Name:"}
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      value={editTeacherForm.name}
+                      onChange={(e) => setEditTeacherForm({ ...editTeacherForm, name: e.target.value })}
+                      className="w-full px-4 py-3 border border-slate-250 rounded-2xl text-xs outline-none focus:ring-2 focus:ring-indigo-500 bg-slate-50/50"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-600 mb-1.5">
+                      {isArabic ? "البريد الإلكتروني (Gmail):" : "Email Address:"}
+                    </label>
+                    <input
+                      type="email"
+                      required
+                      value={editTeacherForm.email}
+                      onChange={(e) => setEditTeacherForm({ ...editTeacherForm, email: e.target.value })}
+                      className="w-full px-4 py-3 border border-slate-250 rounded-2xl text-xs outline-none focus:ring-2 focus:ring-indigo-500 bg-slate-50/50"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-600 mb-1.5">
+                      {isArabic ? "كود الدخول للحساب:" : "Custom Access Code:"}
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      value={editTeacherForm.loginCode}
+                      onChange={(e) => setEditTeacherForm({ ...editTeacherForm, loginCode: e.target.value })}
+                      className="w-full px-4 py-3 border border-slate-250 rounded-2xl text-xs outline-none focus:ring-2 focus:ring-indigo-500 bg-slate-50/50 font-mono"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-600 mb-1.5">
+                      {isArabic ? "التخصص (بالإنجليزي):" : "Specialty (EN):"}
+                    </label>
+                    <input
+                      type="text"
+                      value={editTeacherForm.specialty}
+                      onChange={(e) => setEditTeacherForm({ ...editTeacherForm, specialty: e.target.value })}
+                      placeholder="English & IELTS Instructor"
+                      className="w-full px-4 py-3 border border-slate-250 rounded-2xl text-xs outline-none focus:ring-2 focus:ring-indigo-500 bg-slate-50/50"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-600 mb-1.5">
+                      {isArabic ? "التخصص (بالعربي):" : "Specialty (AR):"}
+                    </label>
+                    <input
+                      type="text"
+                      value={editTeacherForm.specialtyAr}
+                      onChange={(e) => setEditTeacherForm({ ...editTeacherForm, specialtyAr: e.target.value })}
+                      placeholder="أستاذ لغة إنجليزية وآيلتس"
+                      className="w-full px-4 py-3 border border-slate-250 rounded-2xl text-xs outline-none focus:ring-2 focus:ring-indigo-500 bg-slate-50/50"
+                    />
+                  </div>
+
+                  <div className="flex gap-3 pt-2">
+                    <button
+                      type="submit"
+                      className="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 rounded-2xl text-xs transition-all shadow-md shadow-indigo-100 cursor-pointer"
+                    >
+                      {isArabic ? "حفظ التعديلات" : "Save Changes"}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowEditTeacherModal(false);
+                        setEditingTeacher(null);
+                      }}
+                      className="bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold px-4 py-3 rounded-2xl text-xs transition-all cursor-pointer"
+                    >
+                      {isArabic ? "إلغاء" : "Cancel"}
+                    </button>
+                  </div>
+                </form>
               </div>
             </div>
           )}
@@ -2084,6 +2464,20 @@ export default function TeacherDashboard({
 
                         <div className="flex gap-2 shrink-0">
                           <button
+                            onClick={async () => {
+                              const updated = { ...l, isHidden: !l.isHidden };
+                              await saveLesson(updated, currentTeacher?.uid);
+                            }}
+                            className={`p-1.5 rounded-lg border border-transparent transition-all cursor-pointer ${
+                              l.isHidden 
+                                ? "text-amber-600 bg-amber-50 hover:bg-amber-100" 
+                                : "text-neutral-500 hover:text-indigo-600 hover:bg-indigo-50"
+                            }`}
+                            title={l.isHidden ? (isArabic ? "إظهار للطلاب" : "Show to Students") : (isArabic ? "إخفاء عن الطلاب" : "Hide from Students")}
+                          >
+                            {l.isHidden ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                          </button>
+                          <button
                             onClick={() => handleEditLessonTrigger(l)}
                             className="p-1.5 text-neutral-500 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-all"
                             title="Edit"
@@ -2107,12 +2501,179 @@ export default function TeacherDashboard({
               {/* TAB 2: VOCABULARY MANAGEMENT */}
               {activeTab === "vocab" && (
                 <div className="space-y-6">
-                  {/* Vocab Form */}
-                  {showVocabForm ? (
-                    <form onSubmit={handleSaveVocabSubmit} className="bg-white border border-neutral-200 rounded-2xl p-5 space-y-4">
-                      <h4 className="font-extrabold text-xs text-teal-600 uppercase tracking-wider">
-                        {editVocabId ? (isArabic ? "تعديل المفردة" : "Edit Vocab") : (isArabic ? "إضافة مفردة جديدة" : "Create Vocab Word")}
-                      </h4>
+                  {/* Tab Title */}
+                  <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 bg-white border border-neutral-200/80 rounded-2xl p-6 shadow-sm">
+                    <div>
+                      <h3 className="font-extrabold text-neutral-800 text-lg">
+                        {isArabic ? "مكتبة المفردات والـقواميس التفاعلية" : "Interactive Vocabulary & Sections"}
+                      </h3>
+                      <p className="text-xs text-neutral-500 font-medium mt-1">
+                        {isArabic ? "قم بإنشاء وتعديل الأقسام وتصنيفات المفردات لكل مستوى لغوي، وإضافة كلمات وجمل تفاعلية لكل قسم." : "Manage custom dynamic vocabulary sections for each learning level, and organize vocabulary words in real-time."}
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Level Selector Tabs */}
+                  <div className="flex flex-wrap gap-2 p-1 bg-neutral-100 rounded-xl max-w-fit">
+                    {(["A1", "A2", "B1", "B2", "C1", "C2"] as const).map((lvl) => (
+                      <button
+                        key={lvl}
+                        onClick={() => {
+                          setSelectedVocabLevel(lvl);
+                          setSelectedSectionId("");
+                        }}
+                        className={`px-4 py-2 rounded-lg text-xs font-bold transition-all ${
+                          selectedVocabLevel === lvl
+                            ? "bg-teal-600 text-white shadow-sm"
+                            : "text-neutral-600 hover:text-neutral-800 hover:bg-neutral-200/50"
+                        }`}
+                      >
+                        {lvl}
+                      </button>
+                    ))}
+                  </div>
+
+                  {/* Category Section Manager Form */}
+                  {showCategoryForm ? (
+                    <form onSubmit={handleSaveCategorySubmit} className="bg-white border border-neutral-200 rounded-2xl p-5 space-y-4 shadow-sm">
+                      <div className="flex justify-between items-center pb-2 border-b border-neutral-100">
+                        <h4 className="font-extrabold text-xs text-teal-600 uppercase tracking-wider">
+                          {editCategoryId ? (isArabic ? "تعديل قسم المفردات" : "Edit Vocab Section") : (isArabic ? "إضافة قسم مفردات جديد" : "Create New Vocab Section")}
+                        </h4>
+                        <span className="text-[10px] bg-teal-50 text-teal-700 px-2 py-0.5 rounded font-bold uppercase font-mono">
+                          {selectedVocabLevel}
+                        </span>
+                      </div>
+
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                          <label className="block text-xs font-semibold text-neutral-700 mb-1">
+                            {isArabic ? "اسم القسم بالإنجليزي (مثال: Technology):" : "Section Title (English):"}
+                          </label>
+                          <input
+                            type="text"
+                            required
+                            value={categoryForm.en}
+                            onChange={(e) => setCategoryForm({ ...categoryForm, en: e.target.value })}
+                            placeholder="e.g. Technology & Innovation"
+                            className="w-full px-3 py-2 border border-neutral-200 rounded-xl text-xs outline-none focus:ring-2 focus:ring-teal-500"
+                          />
+                        </div>
+
+                        <div>
+                          <label className="block text-xs font-semibold text-neutral-700 mb-1">
+                            {isArabic ? "اسم القسم بالعربي (مثال: التكنولوجيا والابتكار):" : "Section Title (Arabic):"}
+                          </label>
+                          <input
+                            type="text"
+                            required
+                            value={categoryForm.ar}
+                            onChange={(e) => setCategoryForm({ ...categoryForm, ar: e.target.value })}
+                            placeholder="مثال: التكنولوجيا والابتكار"
+                            className="w-full px-3 py-2 border border-neutral-200 rounded-xl text-xs outline-none focus:ring-2 focus:ring-teal-500"
+                          />
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                          <label className="block text-xs font-semibold text-neutral-700 mb-1">
+                            {isArabic ? "الترتيب والظهور للطلاب (رقم أصغر يظهر أولاً):" : "Sorting Order (Smaller numbers appear first):"}
+                          </label>
+                          <input
+                            type="number"
+                            required
+                            value={categoryForm.order}
+                            onChange={(e) => setCategoryForm({ ...categoryForm, order: Number(e.target.value) })}
+                            className="w-full px-3 py-2 border border-neutral-200 rounded-xl text-xs outline-none focus:ring-2 focus:ring-teal-500"
+                          />
+                        </div>
+
+                        <div>
+                          <label className="block text-xs font-semibold text-neutral-700 mb-1">
+                            {isArabic ? "غلاف القسم (صورة من المعرض / الاستوديو):" : "Section Cover Image (Upload from Studio):"}
+                          </label>
+                          <div className="flex items-center gap-3">
+                            <input
+                              type="file"
+                              accept="image/*"
+                              onChange={handleCategoryCoverUpload}
+                              className="hidden"
+                              id="section-cover-upload-file"
+                            />
+                            <label
+                              htmlFor="section-cover-upload-file"
+                              className="px-4 py-2 bg-neutral-100 hover:bg-neutral-200 text-neutral-700 rounded-xl text-xs font-bold cursor-pointer transition-all border border-neutral-200"
+                            >
+                              {isArabic ? "اختر صورة من الاستوديو 🖼️" : "Upload Image 🖼️"}
+                            </label>
+                            {categoryForm.imageUrl && (
+                              <div className="relative group w-12 h-12 rounded-lg overflow-hidden border border-neutral-200 shadow-sm bg-neutral-50">
+                                <img
+                                  src={categoryForm.imageUrl}
+                                  alt="Preview"
+                                  className="w-full h-full object-cover"
+                                  referrerPolicy="no-referrer"
+                                />
+                                <button
+                                  type="button"
+                                  onClick={() => setCategoryForm({ ...categoryForm, imageUrl: "" })}
+                                  className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 flex items-center justify-center text-white text-[9px] font-bold transition-all"
+                                >
+                                  {isArabic ? "إزالة" : "Remove"}
+                                </button>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="flex gap-2 pt-2">
+                        <button
+                          type="submit"
+                          className="flex-1 bg-teal-600 hover:bg-teal-700 text-white font-bold py-2 rounded-xl text-xs transition-all shadow-md"
+                        >
+                          {isArabic ? "حفظ وتحديث القسم" : "Save Section"}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setShowCategoryForm(false);
+                            setEditCategoryId(null);
+                            setCategoryForm({ en: "", ar: "", order: 1, imageUrl: "" });
+                          }}
+                          className="bg-neutral-100 hover:bg-neutral-200 text-neutral-700 font-bold px-4 py-2 rounded-xl text-xs transition-all"
+                        >
+                          {isArabic ? "إلغاء" : "Cancel"}
+                        </button>
+                      </div>
+                    </form>
+                  ) : (
+                    <button
+                      onClick={() => {
+                        // Prepopulate order based on existing count
+                        const count = vocabCategories.filter(c => c.level === selectedVocabLevel).length;
+                        setCategoryForm({ en: "", ar: "", order: count + 1, imageUrl: "" });
+                        setShowCategoryForm(true);
+                      }}
+                      className="flex items-center gap-2 bg-teal-50 hover:bg-teal-100 border border-teal-200 text-teal-700 font-bold py-2.5 px-4 rounded-xl text-xs transition-all w-fit"
+                    >
+                      <Plus className="w-4 h-4" />
+                      <span>{isArabic ? `إضافة قسم جديد لمستوى ${selectedVocabLevel}` : `Add New Section for ${selectedVocabLevel}`}</span>
+                    </button>
+                  )}
+
+                  {/* Vocabulary Word Form (inline/modal) */}
+                  {showVocabForm && (
+                    <form onSubmit={handleSaveVocabSubmit} className="bg-white border-2 border-indigo-200 rounded-2xl p-5 space-y-4 shadow-md">
+                      <div className="flex justify-between items-center pb-2 border-b border-indigo-100">
+                        <h4 className="font-extrabold text-xs text-indigo-600 uppercase tracking-wider">
+                          {editVocabId ? (isArabic ? "تعديل الكلمة لغوية" : "Edit Vocab Word") : (isArabic ? "إضافة كلمة لغوية جديدة" : "Add New Vocab Word")}
+                        </h4>
+                        <span className="text-[10px] bg-indigo-50 text-indigo-700 px-2 py-0.5 rounded font-bold uppercase font-mono">
+                          {vocabForm.category || selectedSectionId} • {selectedVocabLevel}
+                        </span>
+                      </div>
 
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                         <div>
@@ -2124,21 +2685,93 @@ export default function TeacherDashboard({
                             required
                             value={vocabForm.word}
                             onChange={(e) => setVocabForm({ ...vocabForm, word: e.target.value })}
-                            placeholder="e.g. Meticulous"
+                            placeholder="e.g. Conscientious"
                             className="w-full px-3 py-2 border border-neutral-200 rounded-xl text-xs outline-none focus:ring-2 focus:ring-indigo-500"
                           />
                         </div>
 
                         <div>
                           <label className="block text-xs font-semibold text-neutral-700 mb-1">
-                            {isArabic ? "الترجمة العربية:" : "Arabic Translation:"}
+                            {isArabic ? "الترجمة العربية للكلمة:" : "Arabic Translation:"}
                           </label>
                           <input
                             type="text"
                             required
                             value={vocabForm.translation}
                             onChange={(e) => setVocabForm({ ...vocabForm, translation: e.target.value })}
-                            placeholder="دقيق جداً / شديد التفاصيل"
+                            placeholder="مثال: منجز، حي الضمير"
+                            className="w-full px-3 py-2 border border-neutral-200 rounded-xl text-xs outline-none focus:ring-2 focus:ring-indigo-500"
+                          />
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                        <div>
+                          <label className="block text-xs font-semibold text-neutral-700 mb-1">
+                            {isArabic ? "نوع الكلمة (مثال: noun, verb, adj):" : "Part of Speech (optional):"}
+                          </label>
+                          <input
+                            type="text"
+                            value={vocabForm.partOfSpeech}
+                            onChange={(e) => setVocabForm({ ...vocabForm, partOfSpeech: e.target.value })}
+                            placeholder="e.g. Adjective"
+                            className="w-full px-3 py-2 border border-neutral-200 rounded-xl text-xs outline-none focus:ring-2 focus:ring-indigo-500"
+                          />
+                        </div>
+
+                        <div>
+                          <label className="block text-xs font-semibold text-neutral-700 mb-1">
+                            {isArabic ? "اللفظ الصوتي / النطق:" : "Pronunciation Spelling (optional):"}
+                          </label>
+                          <input
+                            type="text"
+                            value={vocabForm.pronunciation}
+                            onChange={(e) => setVocabForm({ ...vocabForm, pronunciation: e.target.value })}
+                            placeholder="e.g. /ˌkɒn.ʃiˈen.ʃəs/"
+                            className="w-full px-3 py-2 border border-neutral-200 rounded-xl text-xs outline-none focus:ring-2 focus:ring-indigo-500"
+                          />
+                        </div>
+
+                        <div>
+                          <label className="block text-xs font-semibold text-neutral-700 mb-1">
+                            {isArabic ? "القسم والموضوع الدراسي:" : "Study Section:"}
+                          </label>
+                          <select
+                            value={vocabForm.category || selectedSectionId}
+                            onChange={(e) => setVocabForm({ ...vocabForm, category: e.target.value })}
+                            className="w-full px-3 py-2 border border-neutral-200 rounded-xl text-xs outline-none focus:ring-2 focus:ring-indigo-500 bg-neutral-50"
+                          >
+                            <option value="">{isArabic ? "اختر القسم..." : "Select Section..."}</option>
+                            {vocabCategories.filter(c => c.level === selectedVocabLevel).map(c => (
+                              <option key={c.id} value={c.id}>{isArabic ? c.ar : c.en}</option>
+                            ))}
+                          </select>
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                          <label className="block text-xs font-semibold text-neutral-700 mb-1">
+                            {isArabic ? "جملة كـ مثال توضيحي (English):" : "Example Sentence (English):"}
+                          </label>
+                          <input
+                            type="text"
+                            value={vocabForm.example}
+                            onChange={(e) => setVocabForm({ ...vocabForm, example: e.target.value })}
+                            placeholder="She is a conscientious worker who always excels."
+                            className="w-full px-3 py-2 border border-neutral-200 rounded-xl text-xs outline-none focus:ring-2 focus:ring-indigo-500"
+                          />
+                        </div>
+
+                        <div>
+                          <label className="block text-xs font-semibold text-neutral-700 mb-1">
+                            {isArabic ? "ترجمة الجملة التوضيحية (العربية):" : "Example Sentence Translation (Arabic):"}
+                          </label>
+                          <input
+                            type="text"
+                            value={vocabForm.exampleAr}
+                            onChange={(e) => setVocabForm({ ...vocabForm, exampleAr: e.target.value })}
+                            placeholder="إنها موظفة مخلصة وحريصة تنجز عملها على أكمل وجه وتتفوق دائماً."
                             className="w-full px-3 py-2 border border-neutral-200 rounded-xl text-xs outline-none focus:ring-2 focus:ring-indigo-500"
                           />
                         </div>
@@ -2147,67 +2780,37 @@ export default function TeacherDashboard({
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                         <div>
                           <label className="block text-xs font-semibold text-neutral-700 mb-1">
-                            {isArabic ? "التصنيف:" : "Category:"}
+                            {isArabic ? "تعريف الكلمة بالإنجليزي:" : "Definition (English):"}
                           </label>
-                          <select
-                            value={vocabForm.category}
-                            onChange={(e) => setVocabForm({ ...vocabForm, category: e.target.value as any })}
+                          <textarea
+                            rows={2}
+                            value={vocabForm.definition}
+                            onChange={(e) => setVocabForm({ ...vocabForm, definition: e.target.value })}
+                            placeholder="Putting a lot of effort into your work; careful and painstaking..."
                             className="w-full px-3 py-2 border border-neutral-200 rounded-xl text-xs outline-none focus:ring-2 focus:ring-indigo-500"
-                          >
-                            <option value="daily">Daily Words</option>
-                            <option value="academic">Academic Words</option>
-                            <option value="common">Common Phrases</option>
-                            <option value="phrasal">Phrasal Verbs</option>
-                          </select>
+                          />
                         </div>
 
                         <div>
                           <label className="block text-xs font-semibold text-neutral-700 mb-1">
-                            {isArabic ? "جملة كـ مثال توضيحي:" : "Example Sentence:"}
+                            {isArabic ? "تعريف الكلمة بالعربي:" : "Definition (Arabic):"}
                           </label>
-                          <input
-                            type="text"
-                            value={vocabForm.example}
-                            onChange={(e) => setVocabForm({ ...vocabForm, example: e.target.value })}
-                            placeholder="She kept meticulous records of the lesson..."
+                          <textarea
+                            rows={2}
+                            value={vocabForm.definitionAr}
+                            onChange={(e) => setVocabForm({ ...vocabForm, definitionAr: e.target.value })}
+                            placeholder="بذل جهد كبير واهتمام فائق بالعمل لإنجازه بدقة متناهية وإخلاص..."
                             className="w-full px-3 py-2 border border-neutral-200 rounded-xl text-xs outline-none focus:ring-2 focus:ring-indigo-500"
                           />
                         </div>
                       </div>
 
-                      <div>
-                        <label className="block text-xs font-semibold text-neutral-700 mb-1">
-                          {isArabic ? "التعريف بالإنجليزية:" : "Definition (English):"}
-                        </label>
-                        <input
-                          type="text"
-                          required
-                          value={vocabForm.definition}
-                          onChange={(e) => setVocabForm({ ...vocabForm, definition: e.target.value })}
-                          placeholder="Very careful and precise; showing great attention..."
-                          className="w-full px-3 py-2 border border-neutral-200 rounded-xl text-xs outline-none focus:ring-2 focus:ring-indigo-500"
-                        />
-                      </div>
-
-                      <div>
-                        <label className="block text-xs font-semibold text-neutral-700 mb-1">
-                          {isArabic ? "الشرح والتعريف بالعربية:" : "Definition (Arabic):"}
-                        </label>
-                        <input
-                          type="text"
-                          value={vocabForm.definitionAr}
-                          onChange={(e) => setVocabForm({ ...vocabForm, definitionAr: e.target.value })}
-                          placeholder="وصف للشخص الدقيق جداً الذي يراعي جميع التفاصيل الصغيرة..."
-                          className="w-full px-3 py-2 border border-neutral-200 rounded-xl text-xs outline-none focus:ring-2 focus:ring-indigo-500"
-                        />
-                      </div>
-
                       <div className="flex gap-2">
                         <button
                           type="submit"
-                          className="flex-1 bg-teal-600 hover:bg-teal-700 text-white font-bold py-2 rounded-xl text-xs transition-all shadow-md"
+                          className="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2 rounded-xl text-xs transition-all shadow-md"
                         >
-                          {isArabic ? "حفظ الكلمة في القاموس" : "Save Vocabulary"}
+                          {isArabic ? "حفظ وتثبيت الكلمة" : "Save Word"}
                         </button>
                         <button
                           type="button"
@@ -2221,44 +2824,173 @@ export default function TeacherDashboard({
                         </button>
                       </div>
                     </form>
-                  ) : (
-                    <button
-                      onClick={() => setShowVocabForm(true)}
-                      className="w-full flex items-center justify-center gap-2 bg-teal-50 hover:bg-teal-100 border border-teal-200 text-teal-700 font-bold py-3 rounded-2xl text-xs transition-all"
-                    >
-                      <Plus className="w-4 h-4" />
-                      <span>{isArabic ? "إضافة مفردة لغوية جديدة" : "Add New Dictionary Vocab Word"}</span>
-                    </button>
                   )}
 
-                  {/* Vocab list */}
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    {vocabulary.map((v) => (
-                      <div key={v.id} className="p-4 bg-white border border-neutral-200/80 rounded-2xl shadow-sm flex justify-between items-center">
-                        <div>
-                          <span className="text-[8px] bg-teal-50 text-teal-700 px-2 py-0.5 rounded uppercase font-bold font-mono">
-                            {v.category}
-                          </span>
-                          <h6 className="font-extrabold text-neutral-800 text-sm mt-1">{v.word}</h6>
-                          <p className="text-xs text-neutral-500 font-medium">{v.translation}</p>
-                        </div>
-
-                        <div className="flex gap-1">
-                          <button
-                            onClick={() => handleEditVocabTrigger(v)}
-                            className="p-1 text-neutral-500 hover:text-indigo-600 hover:bg-neutral-100 rounded"
-                          >
-                            <Edit className="w-3.5 h-3.5" />
-                          </button>
-                          <button
-                            onClick={() => handleDeleteVocabTrigger(v.id)}
-                            className="p-1 text-neutral-500 hover:text-red-600 hover:bg-red-50 rounded"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
-                        </div>
+                  {/* Sections List */}
+                  <div className="space-y-6">
+                    {vocabCategories.filter(c => c.level === selectedVocabLevel).length === 0 ? (
+                      <div className="bg-white border border-dashed border-neutral-200 rounded-2xl p-10 text-center">
+                        <p className="text-sm text-neutral-400 font-semibold">
+                          {isArabic ? `لا توجد أي أقسام لغوية مضافة لمستوى ${selectedVocabLevel} حالياً.` : `No vocabulary sections added for ${selectedVocabLevel} yet.`}
+                        </p>
                       </div>
-                    ))}
+                    ) : (
+                      vocabCategories
+                        .filter(c => c.level === selectedVocabLevel)
+                        .sort((a, b) => a.order - b.order)
+                        .map((cat) => {
+                          const catWords = vocabulary.filter(v => v.category === cat.id || (v.level === selectedVocabLevel && v.category === cat.en));
+                          return (
+                            <div key={cat.id} className="bg-white border border-neutral-200/90 rounded-2xl overflow-hidden shadow-sm">
+                              {/* Section Header Banner */}
+                              <div className="relative h-20 bg-gradient-to-r from-teal-600/90 to-emerald-600/90 flex items-center justify-between px-6 text-white overflow-hidden">
+                                {cat.imageUrl && (
+                                  <img
+                                    src={cat.imageUrl}
+                                    alt="Section Cover"
+                                    className="absolute inset-0 w-full h-full object-cover mix-blend-overlay opacity-30 pointer-events-none"
+                                    referrerPolicy="no-referrer"
+                                  />
+                                )}
+                                <div className="z-10 flex items-center gap-3">
+                                  {cat.imageUrl ? (
+                                    <div className="w-10 h-10 rounded-lg overflow-hidden border border-white/20 shadow-inner shrink-0 bg-white/10">
+                                      <img src={cat.imageUrl} alt="" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                                    </div>
+                                  ) : (
+                                    <div className="w-10 h-10 rounded-lg bg-white/10 flex items-center justify-center text-xs border border-white/20 shrink-0">
+                                      📚
+                                    </div>
+                                  )}
+                                  <div>
+                                    <h4 className="font-extrabold text-sm">{cat.en}</h4>
+                                    <p className="text-xs text-white/80 font-medium">{cat.ar}</p>
+                                  </div>
+                                </div>
+
+                                <div className="z-10 flex items-center gap-2">
+                                  <span className="text-[10px] font-mono font-bold bg-white/20 px-2 py-0.5 rounded">
+                                    {isArabic ? `ترتيب: ${cat.order}` : `Order: ${cat.order}`}
+                                  </span>
+                                  <button
+                                    onClick={() => handleEditCategoryTrigger(cat)}
+                                    className="p-1.5 bg-white/10 hover:bg-white/20 rounded-lg transition-all text-white"
+                                    title={isArabic ? "تعديل القسم" : "Edit Section"}
+                                  >
+                                    <Edit className="w-3.5 h-3.5" />
+                                  </button>
+                                  <button
+                                    onClick={() => handleDeleteCategoryTrigger(cat.id)}
+                                    className="p-1.5 bg-white/10 hover:bg-red-500/30 rounded-lg transition-all text-white hover:text-red-100"
+                                    title={isArabic ? "حذف القسم" : "Delete Section"}
+                                  >
+                                    <Trash2 className="w-3.5 h-3.5" />
+                                  </button>
+                                  <button
+                                    onClick={() => {
+                                      setSelectedSectionId(cat.id);
+                                      setVocabForm({
+                                        word: "",
+                                        translation: "",
+                                        definition: "",
+                                        definitionAr: "",
+                                        example: "",
+                                        exampleAr: "",
+                                        pronunciation: "",
+                                        partOfSpeech: "",
+                                        category: cat.id,
+                                        level: selectedVocabLevel
+                                      });
+                                      setShowVocabForm(true);
+                                    }}
+                                    className="px-3 py-1 bg-white text-teal-800 hover:bg-teal-50 rounded-lg text-xs font-bold transition-all flex items-center gap-1 shadow-sm"
+                                  >
+                                    <Plus className="w-3 h-3" />
+                                    <span>{isArabic ? "إضافة مفردة" : "Add Word"}</span>
+                                  </button>
+                                </div>
+                              </div>
+
+                              {/* Section Words Table */}
+                              <div className="p-4 bg-neutral-50/40">
+                                {catWords.length === 0 ? (
+                                  <p className="text-[10px] text-neutral-400 font-semibold italic text-center py-4">
+                                    {isArabic ? "لا توجد مفردات لغوية مضافة في هذا القسم حالياً." : "No words added to this section yet."}
+                                  </p>
+                                ) : (
+                                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                    {catWords.map((v) => (
+                                      <div key={v.id} className="p-4 bg-white border border-neutral-200 rounded-xl shadow-sm hover:shadow-md transition-all flex justify-between items-start gap-3">
+                                        <div className="space-y-1.5 flex-1 min-w-0">
+                                          <div className="flex flex-wrap items-center gap-1.5">
+                                            <h6 className="font-extrabold text-neutral-800 text-sm truncate">{v.word}</h6>
+                                            {v.partOfSpeech && (
+                                              <span className="text-[9px] bg-neutral-100 text-neutral-500 px-1.5 py-0.2 rounded font-mono font-bold lowercase">
+                                                {v.partOfSpeech}
+                                              </span>
+                                            )}
+                                            {v.pronunciation && (
+                                              <span className="text-[9px] text-neutral-400 font-mono">
+                                                {v.pronunciation}
+                                              </span>
+                                            )}
+                                          </div>
+                                          <p className="text-xs text-teal-700 font-bold">{v.translation}</p>
+                                          
+                                          {v.definition && (
+                                            <div className="text-[10px] text-neutral-600 bg-neutral-50 p-2 rounded-lg space-y-1 border border-neutral-100">
+                                              <p className="font-medium font-mono leading-relaxed">{v.definition}</p>
+                                              {v.definitionAr && <p className="text-neutral-500 font-sans leading-relaxed">{v.definitionAr}</p>}
+                                            </div>
+                                          )}
+
+                                          {v.example && (
+                                            <div className="text-[10px] bg-indigo-50/30 p-2 rounded-lg border border-indigo-100/30">
+                                              <p className="font-semibold text-neutral-700 italic">“ {v.example} ”</p>
+                                              {v.exampleAr && <p className="text-neutral-500 font-medium mt-0.5">({v.exampleAr})</p>}
+                                            </div>
+                                          )}
+                                        </div>
+
+                                        <div className="flex gap-1 shrink-0">
+                                          <button
+                                            onClick={async () => {
+                                              const updated = { ...v, isHidden: !v.isHidden };
+                                              await saveVocabulary(updated, currentTeacher?.uid);
+                                            }}
+                                            className={`p-1.5 rounded-lg border border-transparent transition-all cursor-pointer ${
+                                              v.isHidden 
+                                                ? "text-amber-600 bg-amber-50 hover:bg-amber-100" 
+                                                : "text-neutral-450 hover:text-indigo-600 hover:bg-neutral-100"
+                                            }`}
+                                            title={v.isHidden ? (isArabic ? "إظهار للطلاب" : "Show to Students") : (isArabic ? "إخفاء عن الطلاب" : "Hide from Students")}
+                                          >
+                                            {v.isHidden ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                                          </button>
+                                          <button
+                                            onClick={() => handleEditVocabTrigger(v)}
+                                            className="p-1.5 text-neutral-400 hover:text-indigo-600 hover:bg-neutral-100 rounded-lg transition-all"
+                                            title="Edit Word"
+                                          >
+                                            <Edit className="w-3.5 h-3.5" />
+                                          </button>
+                                          <button
+                                            onClick={() => handleDeleteVocabTrigger(v.id)}
+                                            className="p-1.5 text-neutral-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-all"
+                                            title="Delete Word"
+                                          >
+                                            <Trash2 className="w-3.5 h-3.5" />
+                                          </button>
+                                        </div>
+                                      </div>
+                                    ))}
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                          );
+                        })
+                    )}
                   </div>
                 </div>
               )}

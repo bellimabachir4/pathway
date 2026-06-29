@@ -47,12 +47,11 @@ export default function LessonsSection({
   const categories = [
     { id: "All", en: "All Skills", ar: "كل المهارات" },
     { id: "grammar", en: "Grammar", ar: "القواعد" },
-    { id: "vocabulary", en: "Vocabulary", ar: "المفردات" },
     { id: "reading", en: "Reading", ar: "القراءة" },
     { id: "writing", en: "Writing", ar: "الكتابة" },
     { id: "listening", en: "Listening", ar: "الاستماع" },
     { id: "speaking", en: "Speaking", ar: "المحادثة" },
-    { id: "pronunciation", en: "Pronunciation", ar: "النطق السليم" },
+    { id: "shadowing", en: "Shadowing", ar: "Shadowing (التظليل الصوتي)" },
   ];
 
   const levels = [
@@ -67,6 +66,8 @@ export default function LessonsSection({
   // Filter and sort lessons by order
   const filteredLessons = lessons
     .filter((lesson) => {
+      // Filter out hidden lessons
+      if (lesson.isHidden) return false;
       // If student is logged in, show only lessons matching their selected level
       const levelMatch = student
         ? lesson.level === student.level

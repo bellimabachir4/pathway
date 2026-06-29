@@ -1,4 +1,4 @@
-import { Vocabulary } from "../types";
+import { Vocabulary, DynamicVocabCategory } from "../types";
 
 export interface VocabCategory {
   id: string;
@@ -76,31 +76,119 @@ export const A2_CATEGORIES: VocabCategory[] = [
 ];
 
 export const B1_CATEGORIES: VocabCategory[] = [
-  { id: "Lifestyle & Habits", en: "Lifestyle & Habits", ar: "أسلوب الحياة والعادات" },
-  { id: "Travel & Exploration", en: "Travel & Exploration", ar: "السفر والاستكشاف" },
-  { id: "Work & Employment", en: "Work & Employment", ar: "العمل والتوظيف" },
-  { id: "Social & Cultural Issues", en: "Social & Cultural Issues", ar: "القضايا الاجتماعية والثقافية" },
-  { id: "Environment & Ecology", en: "Environment & Ecology", ar: "البيئة والبيئة الطبيعية" },
-  { id: "Science & Discovery", en: "Science & Discovery", ar: "العلوم والاكتشافات" },
-  { id: "IELTS General Vocabulary", en: "IELTS General Vocabulary", ar: "مفردات الآيلتس العامة" }
+  { id: "Education", en: "Education", ar: "التعليم والمدارس" },
+  { id: "Work & Careers", en: "Work & Careers", ar: "العمل والمهن" },
+  { id: "Business Basics", en: "Business Basics", ar: "أساسيات الأعمال والتجارة" },
+  { id: "Technology", en: "Technology", ar: "التكنولوجيا والاتصالات" },
+  { id: "Social Media", en: "Social Media", ar: "وسائل التواصل الاجتماعي" },
+  { id: "Environment", en: "Environment", ar: "البيئة والطبيعة المحيطة" },
+  { id: "Health & Medicine", en: "Health & Medicine", ar: "الصحة والعناية الطبية" },
+  { id: "Fitness", en: "Fitness", ar: "اللياقة البدنية والصحة" },
+  { id: "Food & Nutrition", en: "Food & Nutrition", ar: "الغذاء والتغذية السليمة" },
+  { id: "Travel", en: "Travel", ar: "السفر والرحلات" },
+  { id: "Tourism", en: "Tourism", ar: "السياحة والمعالم السياحية" },
+  { id: "Transportation", en: "Transportation", ar: "وسائل النقل والمواصلات" },
+  { id: "Accommodation", en: "Accommodation", ar: "السكن والإقامة في السفر" },
+  { id: "Culture", en: "Culture", ar: "الثقافات المختلفة والتقاليد" },
+  { id: "Traditions", en: "Traditions", ar: "العادات والتقاليد الاجتماعية" },
+  { id: "Festivals", en: "Festivals", ar: "المهرجانات والمناسبات السعيدة" },
+  { id: "Relationships", en: "Relationships", ar: "العلاقات والأصدقاء" },
+  { id: "Personality", en: "Personality", ar: "الشخصية والصفات الفردية" },
+  { id: "Feelings & Emotions", en: "Feelings & Emotions", ar: "المشاعر والعواطف والمزاج" },
+  { id: "Crime & Law", en: "Crime & Law", ar: "الجريمة والقوانين الأساسية" },
+  { id: "News & Media", en: "News & Media", ar: "الأخبار والجرائد والتلفزيون" },
+  { id: "Politics Basics", en: "Politics Basics", ar: "أساسيات السياسة والدول" },
+  { id: "Economy Basics", en: "Economy Basics", ar: "أساسيات الاقتصاد والمال" },
+  { id: "Science", en: "Science", ar: "العلوم والاكتشافات البسيطة" },
+  { id: "Communication", en: "Communication", ar: "التواصل والاتصالات اليومية" },
+  { id: "Telephone Conversations", en: "Telephone Conversations", ar: "المحادثات الهاتفية اليومية" },
+  { id: "Problem Solving", en: "Problem Solving", ar: "حل المشكلات والصعوبات" },
+  { id: "Opinions & Discussions", en: "Opinions & Discussions", ar: "إبداء الآراء والمناقشة" },
+  { id: "Common Phrasal Verbs", en: "Common Phrasal Verbs", ar: "الأفعال المركبة الشائعة" },
+  { id: "Intermediate Idioms", en: "Intermediate Idioms", ar: "التعبيرات الاصطلاحية المتوسطة" },
+  { id: "Collocations", en: "Collocations", ar: "التلازم اللفظي للمتوسطين" },
+  { id: "Academic Vocabulary", en: "Academic Vocabulary", ar: "المفردات الأكاديمية للمتوسطين" },
+  { id: "IELTS Vocabulary (B1)", en: "IELTS Vocabulary (B1)", ar: "مفردات الآيلتس لمستوى B1" }
 ];
 
 export const B2_CATEGORIES: VocabCategory[] = [
-  { id: "Academic Discussions", en: "Academic Discussions", ar: "المناقشات الأكاديمية" },
-  { id: "Media & Advertising", en: "Media & Advertising", ar: "الإعلام والإعلانات" },
-  { id: "Global Politics", en: "Global Politics", ar: "السياسة العالمية" },
-  { id: "Science & Technology", en: "Science & Technology", ar: "العلوم والتكنولوجيا" },
-  { id: "Psychology & Behavior", en: "Psychology & Behavior", ar: "علم النفس والسلوك" },
-  { id: "IELTS Core (Band 6.5)", en: "IELTS Core (Band 6.5)", ar: "مفردات الآيلتس الأساسية" }
+  { id: "Advanced Education", en: "Advanced Education", ar: "التعليم المتقدم والدراسة الجامعية" },
+  { id: "University Life", en: "University Life", ar: "الحياة الجامعية والأنشطة الطلابية" },
+  { id: "Professional Careers", en: "Professional Careers", ar: "المسارات المهنية والوظائف الاحترافية" },
+  { id: "Business English", en: "Business English", ar: "إنجليزية الأعمال والشركات" },
+  { id: "Finance", en: "Finance", ar: "المالية والاستثمار والتمويل" },
+  { id: "Marketing", en: "Marketing", ar: "التسويق والإعلانات التجارية" },
+  { id: "Entrepreneurship", en: "Entrepreneurship", ar: "ريادة الأعمال والمشاريع الناشئة" },
+  { id: "Leadership", en: "Leadership", ar: "القيادة والتوجيه الإداري" },
+  { id: "Artificial Intelligence", en: "Artificial Intelligence", ar: "الذكاء الاصطناعي والتقنية الذكية" },
+  { id: "Innovation", en: "Innovation", ar: "الابتكار والحلول الإبداعية" },
+  { id: "Climate Change", en: "Climate Change", ar: "التغير المناخي والبيئي العالمي" },
+  { id: "Global Issues", en: "Global Issues", ar: "القضايا والمشكلات العالمية المشتركة" },
+  { id: "Psychology", en: "Psychology", ar: "علم النفس والسلوك البشري" },
+  { id: "Society", en: "Society", ar: "المجتمع والقضايا المجتمعية" },
+  { id: "Politics", en: "Politics", ar: "السياسة والمؤسسات الحكومية" },
+  { id: "Law", en: "Law", ar: "القانون والأنظمة والتشريعات" },
+  { id: "International Relations", en: "International Relations", ar: "العلاقات الدولية والدبلوماسية والتعاون" },
+  { id: "Media & Journalism", en: "Media & Journalism", ar: "الإعلام والصحافة ونقل الأخبار" },
+  { id: "Literature", en: "Literature", ar: "الأدب والروايات والمسرحيات" },
+  { id: "Arts", en: "Arts", ar: "الفنون والتمثيل والرسم" },
+  { id: "History", en: "History", ar: "التاريخ والأحداث التاريخية الهامة" },
+  { id: "Medicine", en: "Medicine", ar: "الطب والعلوم الطبية الرائدة" },
+  { id: "Scientific Research", en: "Scientific Research", ar: "البحث العلمي والتجارب والعلوم" },
+  { id: "Environment & Sustainability", en: "Environment & Sustainability", ar: "البيئة والاستدامة وحمايتها" },
+  { id: "Debate Vocabulary", en: "Debate Vocabulary", ar: "مفردات المناظرة والمناقشة الحادة" },
+  { id: "Formal English", en: "Formal English", ar: "الإنجليزية الرسمية والأكاديمية" },
+  { id: "Advanced Phrasal Verbs", en: "Advanced Phrasal Verbs", ar: "الأفعال المركبة فوق المتوسطة" },
+  { id: "Advanced Idioms", en: "Advanced Idioms", ar: "التعبيرات الاصطلاحية فوق المتوسطة" },
+  { id: "Collocations", en: "Collocations", ar: "التلازم اللفظي لمستوى B2" },
+  { id: "Academic Vocabulary", en: "Academic Vocabulary", ar: "المفردات الأكاديمية لمستوى B2" }
 ];
 
 export const C1_CATEGORIES: VocabCategory[] = [
-  { id: "Abstract Philosophy", en: "Abstract Philosophy", ar: "الفلسفة المجردة" },
-  { id: "Business & Finance", en: "Business & Finance", ar: "الأعمال والمالية" },
-  { id: "Idiomatic Language", en: "Idiomatic Language", ar: "اللغة الاصطلاحية والمجاز" },
-  { id: "Law & Jurisprudence", en: "Law & Jurisprudence", ar: "القانون والقضاء" },
-  { id: "Literature & Art", en: "Literature & Art", ar: "الأدب والفنون" },
-  { id: "IELTS Advanced (Band 7.5+)", en: "IELTS Advanced (Band 7.5+)", ar: "مفردات الآيلتس المتقدمة" }
+  { id: "Advanced Academic Vocabulary", en: "Advanced Academic Vocabulary", ar: "المفردات الأكاديمية المتقدمة" },
+  { id: "IELTS Advanced Vocabulary", en: "IELTS Advanced Vocabulary", ar: "مفردات الآيلتس المتقدمة (7.5+)" },
+  { id: "Formal English", en: "Formal English", ar: "الإنجليزية الرسمية" },
+  { id: "Business English", en: "Business English", ar: "إنجليزية الأعمال" },
+  { id: "Finance & Economics", en: "Finance & Economics", ar: "المالية والاقتصاد" },
+  { id: "Marketing", en: "Marketing", ar: "التسويق" },
+  { id: "Entrepreneurship", en: "Entrepreneurship", ar: "ريادة الأعمال" },
+  { id: "Leadership & Management", en: "Leadership & Management", ar: "القيادة والإدارة" },
+  { id: "Artificial Intelligence", en: "Artificial Intelligence", ar: "الذكاء الاصطناعي" },
+  { id: "Technology", en: "Technology", ar: "التكنولوجيا والتقنية" },
+  { id: "Cybersecurity", en: "Cybersecurity", ar: "الأمن السيبراني" },
+  { id: "Data & Innovation", en: "Data & Innovation", ar: "البيانات والابتكار" },
+  { id: "Medicine", en: "Medicine", ar: "الطب والجراحة" },
+  { id: "Healthcare", en: "Healthcare", ar: "الرعاية الصحية" },
+  { id: "Psychology", en: "Psychology", ar: "علم النفس والتحليل السلوكي" },
+  { id: "Sociology", en: "Sociology", ar: "علم الاجتماع" },
+  { id: "Philosophy", en: "Philosophy", ar: "الفلسفة والمنطق" },
+  { id: "Politics", en: "Politics", ar: "السياسة والأنظمة" },
+  { id: "International Relations", en: "International Relations", ar: "العلاقات الدولية" },
+  { id: "Law & Justice", en: "Law & Justice", ar: "القانون والعدالة" },
+  { id: "Crime", en: "Crime", ar: "الجريمة والتحقيق" },
+  { id: "Environment", en: "Environment", ar: "البيئة والحياة الفطرية" },
+  { id: "Climate Change", en: "Climate Change", ar: "التغير المناخي" },
+  { id: "Sustainability", en: "Sustainability", ar: "الاستدامة والحفاظ على الموارد" },
+  { id: "Science", en: "Science", ar: "العلوم العامة والفيزياء" },
+  { id: "Engineering", en: "Engineering", ar: "الهندسة والتصنيع" },
+  { id: "Research", en: "Research", ar: "البحث والأطروحات" },
+  { id: "Media & Journalism", en: "Media & Journalism", ar: "الصحافة والإعلام" },
+  { id: "Literature", en: "Literature", ar: "الأدب" },
+  { id: "History", en: "History", ar: "التاريخ" },
+  { id: "Arts & Culture", en: "Arts & Culture", ar: "الفنون والثقافة" },
+  { id: "Education", en: "Education", ar: "التعليم" },
+  { id: "Communication Skills", en: "Communication Skills", ar: "مهارات التواصل" },
+  { id: "Public Speaking", en: "Public Speaking", ar: "الخطابة والإلقاء" },
+  { id: "Debate & Argumentation", en: "Debate & Argumentation", ar: "المناظرة والحجج" },
+  { id: "Negotiation", en: "Negotiation", ar: "التفاوض" },
+  { id: "Advanced Phrasal Verbs", en: "Advanced Phrasal Verbs", ar: "الأفعال المركبة المتقدمة" },
+  { id: "Advanced Idioms", en: "Advanced Idioms", ar: "التعبيرات الاصطلاحية المتقدمة" },
+  { id: "Collocations", en: "Collocations", ar: "المتلازمات اللفظية المتقدمة" },
+  { id: "Synonyms & Antonyms", en: "Synonyms & Antonyms", ar: "المترادفات والمتضادات" },
+  { id: "Difficult Verbs", en: "Difficult Verbs", ar: "الأفعال الصعبة" },
+  { id: "Difficult Adjectives", en: "Difficult Adjectives", ar: "الصفات الصعبة" },
+  { id: "Difficult Nouns", en: "Difficult Nouns", ar: "الأسماء الصعبة" },
+  { id: "Common IELTS C1 Expressions", en: "Common IELTS C1 Expressions", ar: "تعبيرات آيلتس شائعة لمستوى C1" }
 ];
 
 export const C2_CATEGORIES: VocabCategory[] = [
@@ -124,6 +212,29 @@ export function getCategoriesForLevel(level: string): VocabCategory[] {
       { id: "Academic", en: "Academic English", ar: "اللغة الإنجليزية الأكاديمية" }
     ];
   }
+}
+
+export function getDefaultCategories(): DynamicVocabCategory[] {
+  const all: DynamicVocabCategory[] = [];
+  const add = (list: VocabCategory[], level: "A1" | "A2" | "B1" | "B2" | "C1" | "C2") => {
+    list.forEach((item, index) => {
+      all.push({
+        id: `${level}_${item.id}`.replace(/\s+/g, '_').replace(/&/g, 'and').replace(/[()+]/g, ''),
+        en: item.en,
+        ar: item.ar,
+        level,
+        order: index + 1,
+        imageUrl: ""
+      });
+    });
+  };
+  add(A1_CATEGORIES, "A1");
+  add(A2_CATEGORIES, "A2");
+  add(B1_CATEGORIES, "B1");
+  add(B2_CATEGORIES, "B2");
+  add(C1_CATEGORIES, "C1");
+  add(C2_CATEGORIES, "C2");
+  return all;
 }
 
 // Rich set of seed vocabulary words covering typical categories.

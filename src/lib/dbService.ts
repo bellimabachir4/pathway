@@ -14,8 +14,9 @@ import {
   orderBy,
   limit 
 } from "./firebase";
-import { Student, Teacher, Lesson, Vocabulary, LiveSession, ChatMessage, Announcement, DailyTask, WeeklyTask, ResourceOrTip, TrainingTopic, TrainingQuestion, TypingSentence, RecordedLesson, LibraryBook } from "../types";
+import { Student, Teacher, Lesson, Vocabulary, DynamicVocabCategory, LiveSession, ChatMessage, Announcement, DailyTask, WeeklyTask, ResourceOrTip, TrainingTopic, TrainingQuestion, TypingSentence, RecordedLesson, LibraryBook, TrainingAttempt } from "../types";
 import { defaultLessons, defaultVocabulary, defaultLiveSessions } from "./defaultData";
+import { getDefaultCategories } from "../data/vocabularyData";
 
 // Local storage keys as backup/cache
 const KEYS = {
@@ -1289,6 +1290,131 @@ export function subscribeToVocabulary(callback: (vocab: Vocabulary[]) => void, t
   return () => {};
 }
 
+export function subscribeToTrainingTopics(callback: (topics: TrainingTopic[]) => void, teacherId?: string): () => void {
+  const tid = teacherId || "teacher-sarah";
+  const localKey = `ep_training_topics_${tid}`;
+  if (db) {
+    try {
+      return onSnapshot(collection(db, "teachers", tid, "training_topics"), (snap) => {
+        const list: TrainingTopic[] = [];
+        snap.forEach((docSnap) => {
+          list.push(docSnap.data() as TrainingTopic);
+        });
+        if (list.length > 0) {
+          setLocal(localKey, list);
+          callback(list);
+        } else {
+          callback(defaultTrainingTopics);
+        }
+      }, (err) => {
+        console.warn("Firestore subscribeToTrainingTopics failed, using cache:", err);
+        callback(getLocal<TrainingTopic[]>(localKey, defaultTrainingTopics));
+      });
+    } catch (e) {
+      console.warn("Firestore subscribeToTrainingTopics setup failed:", e);
+    }
+  }
+  callback(getLocal<TrainingTopic[]>(localKey, defaultTrainingTopics));
+  return () => {};
+}
+
+export function subscribeToTrainingQuestions(callback: (questions: TrainingQuestion[]) => void, teacherId?: string): () => void {
+  const tid = teacherId || "teacher-sarah";
+  const localKey = `ep_training_questions_${tid}`;
+  if (db) {
+    try {
+      return onSnapshot(collection(db, "teachers", tid, "training_questions"), (snap) => {
+        const list: TrainingQuestion[] = [];
+        snap.forEach((docSnap) => {
+          list.push(docSnap.data() as TrainingQuestion);
+        });
+        setLocal(localKey, list);
+        callback(list);
+      }, (err) => {
+        console.warn("Firestore subscribeToTrainingQuestions failed, using cache:", err);
+        callback(getLocal<TrainingQuestion[]>(localKey, []));
+      });
+    } catch (e) {
+      console.warn("Firestore subscribeToTrainingQuestions setup failed:", e);
+    }
+  }
+  callback(getLocal<TrainingQuestion[]>(localKey, []));
+  return () => {};
+}
+
+export function subscribeToVocabCategories(callback: (categories: DynamicVocabCategory[]) => void, teacherId?: string): () => void {
+  const tid = teacherId || "teacher-sarah";
+  const localKey = `ep_vocab_categories_list_${tid}`;
+  const fallback = getDefaultCategories();
+  if (db) {
+    try {
+      return onSnapshot(collection(db, "teachers", tid, "vocabCategories"), async (snap) => {
+        const list: DynamicVocabCategory[] = [];
+        snap.forEach((docSnap) => {
+          list.push(docSnap.data() as DynamicVocabCategory);
+        });
+        if (list.length > 0) {
+          list.sort((a, b) => a.order - b.order);
+          setLocal(localKey, list);
+          callback(list);
+        } else {
+          // Seed categories collection
+          for (const cat of fallback) {
+            await setDoc(doc(db, "teachers", tid, "vocabCategories", cat.id), cat);
+          }
+          setLocal(localKey, fallback);
+          callback(fallback);
+        }
+      }, (err) => {
+        console.warn("Firestore subscribeToVocabCategories failed, using cache:", err);
+        callback(getLocal<DynamicVocabCategory[]>(localKey, fallback));
+      });
+    } catch (e) {
+      console.warn("Firestore subscribeToVocabCategories setup failed:", e);
+    }
+  }
+  callback(getLocal<DynamicVocabCategory[]>(localKey, fallback));
+  return () => {};
+}
+
+export async function saveVocabCategory(category: DynamicVocabCategory, teacherId?: string): Promise<void> {
+  const tid = teacherId || "teacher-sarah";
+  const localKey = `ep_vocab_categories_list_${tid}`;
+  const current = getLocal<DynamicVocabCategory[]>(localKey, getDefaultCategories());
+  const idx = current.findIndex(c => c.id === category.id);
+  if (idx > -1) {
+    current[idx] = category;
+  } else {
+    current.push(category);
+  }
+  current.sort((a, b) => a.order - b.order);
+  setLocal(localKey, current);
+
+  if (db) {
+    try {
+      await setDoc(doc(db, "teachers", tid, "vocabCategories", category.id), category);
+    } catch (e) {
+      console.warn("Firestore saveVocabCategory failed:", e);
+    }
+  }
+}
+
+export async function deleteVocabCategory(id: string, teacherId?: string): Promise<void> {
+  const tid = teacherId || "teacher-sarah";
+  const localKey = `ep_vocab_categories_list_${tid}`;
+  const current = getLocal<DynamicVocabCategory[]>(localKey, getDefaultCategories());
+  const updated = current.filter(c => c.id !== id);
+  setLocal(localKey, updated);
+
+  if (db) {
+    try {
+      await deleteDoc(doc(db, "teachers", tid, "vocabCategories", id));
+    } catch (e) {
+      console.warn("Firestore deleteVocabCategory failed:", e);
+    }
+  }
+}
+
 export function subscribeToLiveSessions(callback: (sessions: LiveSession[]) => void, teacherId?: string): () => void {
   const tid = teacherId || "teacher-sarah";
   const localKey = `ep_live_sessions_list_${tid}`;
@@ -2021,6 +2147,48 @@ export async function deleteLibraryBook(id: string, teacherId?: string): Promise
       console.warn("Firestore deleteLibraryBook failed:", e);
     }
   }
+}
+
+export async function saveTrainingAttempt(attempt: TrainingAttempt): Promise<void> {
+  const localKey = `ep_training_attempts_${attempt.studentId}`;
+  const current = getLocal<TrainingAttempt[]>(localKey, []);
+  const updated = current.some(x => x.id === attempt.id)
+    ? current.map(x => x.id === attempt.id ? attempt : x)
+    : [...current, attempt];
+  updated.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+  setLocal(localKey, updated);
+
+  if (db) {
+    try {
+      await setDoc(doc(db, "students", attempt.studentId, "training_attempts", attempt.id), attempt);
+    } catch (e) {
+      console.warn("Firestore saveTrainingAttempt failed:", e);
+    }
+  }
+}
+
+export function subscribeToTrainingAttempts(studentId: string, callback: (attempts: TrainingAttempt[]) => void): () => void {
+  const localKey = `ep_training_attempts_${studentId}`;
+  if (db) {
+    try {
+      return onSnapshot(collection(db, "students", studentId, "training_attempts"), (snap) => {
+        const list: TrainingAttempt[] = [];
+        snap.forEach((docSnap) => {
+          list.push(docSnap.data() as TrainingAttempt);
+        });
+        list.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+        setLocal(localKey, list);
+        callback(list);
+      }, (err) => {
+        console.warn("Firestore subscribeToTrainingAttempts failed, using cache:", err);
+        callback(getLocal<TrainingAttempt[]>(localKey, []));
+      });
+    } catch (e) {
+      console.warn("Firestore subscribeToTrainingAttempts setup failed:", e);
+    }
+  }
+  callback(getLocal<TrainingAttempt[]>(localKey, []));
+  return () => {};
 }
 
 

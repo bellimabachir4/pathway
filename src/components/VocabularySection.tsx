@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useEffect } from "react";
-import { Vocabulary, Student } from "../types";
+import { Vocabulary, Student, DynamicVocabCategory } from "../types";
 import { 
   Sparkles, 
   Bookmark, 
@@ -24,6 +24,7 @@ import { SEED_VOCABULARY, VocabCategory, getCategoriesForLevel } from "../data/v
 
 interface VocabularySectionProps {
   vocabulary: Vocabulary[];
+  vocabCategories?: DynamicVocabCategory[];
   student: Student | null;
   onUpdateStudent: (updated: Student) => void;
   onOpenAuth: () => void;
@@ -32,6 +33,7 @@ interface VocabularySectionProps {
 
 export default function VocabularySection({
   vocabulary,
+  vocabCategories = [],
   student,
   onUpdateStudent,
   onOpenAuth,
@@ -59,11 +61,6 @@ export default function VocabularySection({
     const cached = localStorage.getItem("local_extra_words");
     return cached ? JSON.parse(cached) : [];
   });
-
-  // AI Generation States
-  const [isGenerating, setIsGenerating] = useState(false);
-  const [generationSuccess, setGenerationSuccess] = useState(false);
-  const [generationError, setGenerationError] = useState<string | null>(null);
 
   // Quiz States
   const [quizActive, setQuizActive] = useState(false);
@@ -101,6 +98,7 @@ export default function VocabularySection({
     // 3. Remove duplicates by lowercase word & level & category combination
     const uniqueMap = new Map<string, Vocabulary>();
     combined.forEach((item) => {
+      if (item.isHidden) return; // Skip hidden words for students
       const key = `${item.word.toLowerCase()}_${item.level}_${item.category}`;
       if (!uniqueMap.has(key)) {
         uniqueMap.set(key, item);
@@ -120,8 +118,23 @@ export default function VocabularySection({
     return counts;
   }, [allWords]);
 
-  // Get current categories list based on level
-  const currentCategoriesList = getCategoriesForLevel(activeLevel);
+  // Get current categories list based on level (custom dynamic ones with fallback to static ones)
+  const currentCategoriesList = useMemo(() => {
+    const dynamicCats = (vocabCategories || []).filter(c => c.level === activeLevel);
+    if (dynamicCats.length > 0) {
+      return dynamicCats.sort((a, b) => a.order - b.order);
+    }
+    // Fallback to defaults generated from getCategoriesForLevel(activeLevel)
+    const defaults = getCategoriesForLevel(activeLevel);
+    return defaults.map((d, index) => ({
+      id: d.id,
+      en: d.en,
+      ar: d.ar,
+      level: activeLevel,
+      order: index + 1,
+      imageUrl: ""
+    }));
+  }, [vocabCategories, activeLevel]);
 
   // Filtered vocabulary list
   const filteredVocab = useMemo(() => {
@@ -176,73 +189,6 @@ export default function VocabularySection({
       return student.savedWords.includes(wordId);
     }
     return guestSavedWords.includes(wordId);
-  };
-
-  // Generate Vocabulary words with Gemini on-demand
-  const handleGenerateAIWords = async () => {
-    if (!selectedCategory) return;
-    setIsGenerating(true);
-    setGenerationError(null);
-    setGenerationSuccess(false);
-
-    const teacherId = student?.selectedTeacherId || "teacher-sarah";
-    const existingWordsInCat = filteredVocab.length;
-
-    try {
-      const response = await fetch("/api/generate-vocab", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          category: selectedCategory,
-          level: activeLevel,
-          existingWordsCount: existingWordsInCat
-        })
-      });
-
-      const data = await response.json();
-
-      if (!response.ok || !data.success) {
-        throw new Error(data.error || "Failed to generate vocabulary words.");
-      }
-
-      const generatedList: Vocabulary[] = data.words.map((item: any, idx: number) => ({
-        id: `ai-vocab-${Date.now()}-${idx}`,
-        word: item.word,
-        translation: item.translation,
-        definition: item.definition || "",
-        definitionAr: item.definitionAr || "",
-        example: item.example,
-        exampleAr: item.exampleAr || "",
-        category: selectedCategory,
-        level: activeLevel,
-        partOfSpeech: item.partOfSpeech || "Noun",
-        pronunciation: item.pronunciation || "",
-        createdAt: new Date().toISOString()
-      }));
-
-      // 1. Save locally to immediate view state
-      setLocalExtraWords(prev => [...prev, ...generatedList]);
-
-      // 2. Save each to Firestore under active teacher's collection
-      for (const item of generatedList) {
-        await saveVocabulary(item, teacherId);
-      }
-
-      setGenerationSuccess(true);
-      confetti({
-        particleCount: 80,
-        spread: 60,
-        origin: { y: 0.8 }
-      });
-      
-      // Clear success badge after a few seconds
-      setTimeout(() => setGenerationSuccess(false), 5000);
-    } catch (err: any) {
-      console.error("AI Generation Failed:", err);
-      setGenerationError(err.message || "An error occurred while generating words.");
-    } finally {
-      setIsGenerating(false);
-    }
   };
 
   // Generate and Start Vocabulary Quiz
@@ -358,12 +304,12 @@ export default function VocabularySection({
                 {isArabic ? "مكتبة المفردات الشاملة" : "Comprehensive Vocabulary Library"}
               </span>
               <h2 className="text-3xl sm:text-4xl font-extrabold font-display leading-tight tracking-tight">
-                {isArabic ? "مفردات مستويات A1 & A2 اللغوية" : "CEFR Levels A1 & A2 Vocabulary"}
+                {isArabic ? `مفردات مستوى ${student?.level || "B1"}` : `Level ${student?.level || "B1"} Vocabulary`}
               </h2>
               <p className="text-slate-300 text-xs sm:text-sm leading-relaxed font-medium">
                 {isArabic
-                  ? "مكتبة تفاعلية شاملة مخصصة لطلاب مستويي A1 و A2. تصفح الفئات والمواضيع التعليمية، استمع إلى النطق الصحيح، أضف الكلمات لمفضلتك، وقم بتوليد كلمات إضافية لا حصر لها بذكاء اصطناعي فائق."
-                  : "Explore curated lists of essential words for A1 & A2 levels. Listen to native speech guides, favorite words to build your custom dictionary, and generate endless premium vocab words on-demand using AI."}
+                  ? `مكتبة تفاعلية شاملة مخصصة لطلاب مستوى ${student?.level || "B1"}. تصفح الفئات والمواضيع التعليمية، استمع إلى النطق الصحيح، وأضف الكلمات لمفضلتك الشخصية.`
+                  : `Explore curated lists of essential words for Level ${student?.level || "B1"}. Listen to native speech guides and favorite words to build your custom dictionary.`}
               </p>
 
               <div className="flex flex-wrap items-center gap-3 pt-2 text-xs font-bold text-slate-300">
@@ -494,30 +440,44 @@ export default function VocabularySection({
                           key={cat.id}
                           className="group relative flex flex-col justify-between p-4 bg-white border border-slate-200 rounded-2xl text-left rtl:text-right shadow-sm hover:shadow-md cursor-pointer transition-all overflow-hidden h-44"
                         >
-                          {/* Aesthetic Book Spine Accent */}
-                          <div className={`absolute top-0 bottom-0 left-0 w-2.5 bg-gradient-to-b ${getCoverGradient(cat.id)} rounded-l-2xl`} />
+                          {/* Section Cover Image if exists, else gradient spine */}
+                          {cat.imageUrl ? (
+                            <div className="absolute inset-0 w-full h-full">
+                              <img
+                                src={cat.imageUrl}
+                                alt={cat.en}
+                                className="w-full h-full object-cover group-hover:scale-105 transition-all duration-300"
+                                referrerPolicy="no-referrer"
+                              />
+                              <div className="absolute inset-0 bg-gradient-to-b from-slate-900/40 via-slate-950/70 to-slate-950/90" />
+                            </div>
+                          ) : (
+                            <div className={`absolute top-0 bottom-0 left-0 w-2.5 bg-gradient-to-b ${getCoverGradient(cat.id)} rounded-l-2xl`} />
+                          )}
                           
-                          <div className="pl-2 space-y-2">
-                            <span className="text-[10px] font-black text-slate-400 font-mono tracking-widest uppercase block">
+                          <div className="pl-2 space-y-2 z-10">
+                            <span className={`text-[10px] font-black font-mono tracking-widest uppercase block ${cat.imageUrl ? "text-teal-400" : "text-slate-400"}`}>
                               {activeLevel} • BOOK
                             </span>
-                            <h4 className="font-extrabold text-slate-800 group-hover:text-indigo-600 transition-colors text-sm sm:text-base leading-snug">
+                            <h4 className={`font-extrabold transition-colors text-sm sm:text-base leading-snug ${cat.imageUrl ? "text-white group-hover:text-teal-300" : "text-slate-800 group-hover:text-indigo-600"}`}>
                               {cat.en}
                             </h4>
-                            <p className="text-xs text-slate-500 font-medium">
+                            <p className={`text-xs font-medium ${cat.imageUrl ? "text-slate-200/95" : "text-slate-500"}`}>
                               {cat.ar}
                             </p>
                           </div>
 
                           {/* Words Counter Badge inside Book */}
-                          <div className="pl-2 pt-2 border-t border-slate-100 flex justify-between items-center w-full">
+                          <div className={`pl-2 pt-2 border-t flex justify-between items-center w-full z-10 ${cat.imageUrl ? "border-white/10" : "border-slate-100"}`}>
                             <span className={`text-[10px] font-bold px-2.5 py-1 rounded-full ${
-                              count > 0 ? "bg-indigo-50 text-indigo-700 border border-indigo-100/30" : "bg-amber-50 text-amber-700 border border-amber-100/30"
+                              count > 0 
+                                ? (cat.imageUrl ? "bg-teal-500/20 text-teal-300 border border-teal-400/30" : "bg-indigo-50 text-indigo-700 border border-indigo-100/30") 
+                                : (cat.imageUrl ? "bg-white/10 text-slate-300 border border-white/20" : "bg-amber-50 text-amber-700 border border-amber-100/30")
                             }`}>
                               {count > 0 ? `${count} ${isArabic ? "كلمة" : "Words"}` : (isArabic ? "جديد / AI" : "AI Ready")}
                             </span>
                             
-                            <ChevronRight className="w-4 h-4 text-slate-400 group-hover:text-indigo-600 transform group-hover:translate-x-1 transition-all" />
+                            <ChevronRight className={`w-4 h-4 transform group-hover:translate-x-1 transition-all ${cat.imageUrl ? "text-slate-300 group-hover:text-teal-300" : "text-slate-400 group-hover:text-indigo-600"}`} />
                           </div>
                         </motion.button>
                       );
@@ -535,100 +495,66 @@ export default function VocabularySection({
                 className="space-y-6"
               >
                 {/* Book header */}
-                <div className="flex flex-col sm:flex-row gap-4 justify-between items-start sm:items-center bg-slate-50 border border-slate-200 rounded-3xl p-5 shadow-xs">
-                  <div className="flex items-center gap-4 text-left rtl:text-right">
-                    <button
-                      onClick={() => setSelectedCategory(null)}
-                      className="p-3 bg-white border border-slate-200 hover:border-slate-300 rounded-xl text-slate-500 hover:text-slate-900 transition-all cursor-pointer shadow-xs"
-                      title={isArabic ? "الرجوع للرف" : "Back to Shelf"}
-                    >
-                      <ArrowLeft className="w-4 h-4 transform rtl:rotate-180" />
-                    </button>
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <span className="text-[9px] font-black tracking-widest uppercase bg-indigo-50 text-indigo-700 border border-indigo-100 px-2 py-0.5 rounded-md font-mono">
-                          {activeLevel}
-                        </span>
-                        <span className="text-xs font-bold text-slate-400">
-                          {isArabic ? "مفردات كتاب:" : "Book:"}
-                        </span>
-                      </div>
-                      <h3 className="text-lg sm:text-xl font-black text-slate-900 leading-tight">
-                        {currentCategoriesList.find(c => c.id === selectedCategory)?.en} - {currentCategoriesList.find(c => c.id === selectedCategory)?.ar}
-                      </h3>
-                    </div>
-                  </div>
-
-                  {/* Right hand search and quiz */}
-                  <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
-                    <input
-                      type="text"
-                      value={searchQuery}
-                      onChange={(e) => setSearchQuery(e.target.value)}
-                      placeholder={isArabic ? "تصفية الكلمات..." : "Filter words..."}
-                      className="w-full sm:w-48 text-xs p-2.5 border border-slate-200 bg-white rounded-xl outline-none"
-                    />
-                    <button
-                      onClick={startVocabQuiz}
-                      className="flex-1 sm:flex-none flex items-center justify-center gap-1 bg-indigo-600 hover:bg-indigo-700 text-white font-extrabold px-4 py-2.5 rounded-xl text-xs shadow-md shadow-indigo-100 cursor-pointer"
-                    >
-                      <Brain className="w-3.5 h-3.5" />
-                      <span>{isArabic ? "بدء اختبار الفئة" : "Practice Category"}</span>
-                    </button>
-                  </div>
-                </div>
-
-                {/* AI vocabulary extension builder */}
-                <div className="bg-gradient-to-br from-amber-50 to-orange-50/50 border border-amber-200/80 rounded-3xl p-6 shadow-xs flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
-                  <div className="space-y-1 text-left rtl:text-right">
-                    <span className="inline-flex items-center gap-1 bg-amber-100/80 border border-amber-200 text-amber-800 text-[10px] font-black px-2.5 py-0.5 rounded-full uppercase">
-                      <Sparkles className="w-3 h-3 text-amber-600" />
-                      {isArabic ? "موسع المفردات بالذكاء الاصطناعي" : "AI Vocab Expander"}
-                    </span>
-                    <h4 className="text-sm font-black text-slate-800">
-                      {isArabic ? "هل تحتاج إلى المزيد من الكلمات في هذه الفئة؟" : "Want to learn even more words in this topic?"}
-                    </h4>
-                    <p className="text-xs text-slate-500 leading-relaxed font-medium">
-                      {isArabic 
-                        ? "اضغط لتوليد قائمة من 15 كلمة ومصطلح لغوي جديد ومكمل مع النطق والأمثلة المترجمة باستخدام الذكاء الاصطناعي." 
-                        : "Click to dynamically generate 15 fresh, high-quality, complementary CEFR vocabulary words with audio, details, and translations."}
-                    </p>
-                  </div>
-
-                  <div className="w-full md:w-auto shrink-0 space-y-2">
-                    <button
-                      disabled={isGenerating}
-                      onClick={handleGenerateAIWords}
-                      className="w-full md:w-auto flex items-center justify-center gap-2 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 text-white font-black px-5 py-3 rounded-xl text-xs shadow-md shadow-amber-200 border border-amber-600/10 cursor-pointer transition-all disabled:opacity-50"
-                    >
-                      {isGenerating ? (
-                        <>
-                          <Loader2 className="w-4 h-4 animate-spin" />
-                          <span>{isArabic ? "جاري التوليد بالذكاء الاصطناعي..." : "Generating words..."}</span>
-                        </>
-                      ) : (
-                        <>
-                          <Sparkles className="w-4 h-4 text-white" />
-                          <span>{isArabic ? "توليد 15 كلمة إضافية" : "Generate 15 More Words"}</span>
-                        </>
+                {(() => {
+                  const currentCat = currentCategoriesList.find(c => c.id === selectedCategory);
+                  return (
+                    <div className="relative overflow-hidden border border-slate-200 rounded-3xl p-5 shadow-xs bg-slate-50">
+                      {currentCat?.imageUrl && (
+                        <div className="absolute inset-0">
+                          <img
+                            src={currentCat.imageUrl}
+                            alt=""
+                            className="w-full h-full object-cover opacity-15 pointer-events-none blur-[1px]"
+                            referrerPolicy="no-referrer"
+                          />
+                          <div className="absolute inset-0 bg-gradient-to-r from-slate-50 via-slate-50/90 to-transparent" />
+                        </div>
                       )}
-                    </button>
+                      <div className="relative z-10 flex flex-col sm:flex-row gap-4 justify-between items-start sm:items-center">
+                        <div className="flex items-center gap-4 text-left rtl:text-right">
+                          <button
+                            onClick={() => setSelectedCategory(null)}
+                            className="p-3 bg-white border border-slate-200 hover:border-slate-300 rounded-xl text-slate-500 hover:text-slate-900 transition-all cursor-pointer shadow-xs"
+                            title={isArabic ? "الرجوع للرف" : "Back to Shelf"}
+                          >
+                            <ArrowLeft className="w-4 h-4 transform rtl:rotate-180" />
+                          </button>
+                          <div>
+                            <div className="flex items-center gap-2">
+                              <span className="text-[9px] font-black tracking-widest uppercase bg-indigo-50 text-indigo-700 border border-indigo-100 px-2 py-0.5 rounded-md font-mono">
+                                {activeLevel}
+                              </span>
+                              <span className="text-xs font-bold text-slate-400">
+                                {isArabic ? "مفردات كتاب:" : "Book:"}
+                              </span>
+                            </div>
+                            <h3 className="text-lg sm:text-xl font-black text-slate-900 leading-tight">
+                              {currentCat?.en} - {currentCat?.ar}
+                            </h3>
+                          </div>
+                        </div>
 
-                    {generationSuccess && (
-                      <div className="text-[10px] text-emerald-600 font-bold flex items-center gap-1 justify-center md:justify-end animate-fade-in">
-                        <CheckCircle className="w-3 h-3" />
-                        <span>{isArabic ? "تم حفظ وإضافة الكلمات بنجاح!" : "Words generated and added!"}</span>
+                        {/* Right hand search and quiz */}
+                        <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
+                          <input
+                            type="text"
+                            value={searchQuery}
+                            onChange={(e) => setSearchQuery(e.target.value)}
+                            placeholder={isArabic ? "تصفية الكلمات..." : "Filter words..."}
+                            className="w-full sm:w-48 text-xs p-2.5 border border-slate-200 bg-white rounded-xl outline-none"
+                          />
+                          <button
+                            onClick={startVocabQuiz}
+                            className="flex-1 sm:flex-none flex items-center justify-center gap-1 bg-indigo-600 hover:bg-indigo-700 text-white font-extrabold px-4 py-2.5 rounded-xl text-xs shadow-md shadow-indigo-100 cursor-pointer"
+                          >
+                            <Brain className="w-3.5 h-3.5" />
+                            <span>{isArabic ? "بدء اختبار الفئة" : "Practice Category"}</span>
+                          </button>
+                        </div>
                       </div>
-                    )}
-                  </div>
-                </div>
-
-                {generationError && (
-                  <div className="bg-rose-50 border border-rose-200 text-rose-700 p-4 rounded-2xl text-xs flex items-center gap-2 animate-fade-in font-medium">
-                    <AlertCircle className="w-4 h-4 shrink-0" />
-                    <span>{generationError}</span>
-                  </div>
-                )}
+                    </div>
+                  );
+                })()}
 
                 {/* Words Grid list */}
                 {filteredVocab.length > 0 ? (
@@ -721,8 +647,8 @@ export default function VocabularySection({
                     <Search className="w-12 h-12 text-slate-300 mx-auto mb-3" />
                     <p className="text-slate-500 text-sm font-bold">
                       {isArabic
-                        ? "المكتبة لا تحتوي على كلمات كافية لهذه الفئة بعد. اضغط على الزر بالأعلى لتوليد كلمات بالذكاء الاصطناعي!"
-                        : "No words in this bookshelf yet. Click the button above to seed words using AI!"}
+                        ? "المكتبة لا تحتوي على كلمات كافية لهذه الفئة بعد."
+                        : "No words in this bookshelf yet."}
                     </p>
                   </div>
                 )}

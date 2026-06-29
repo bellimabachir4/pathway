@@ -7,7 +7,7 @@ export const defaultLessons: Lesson[] = [
     id: "vocabulary-1",
     title: "Essential Adjectives for Success",
     titleAr: "صفات أساسية للنجاح والتميز",
-    category: "vocabulary",
+    category: "reading",
     level: "B1",
     content: `### Expand Your Vocabulary
 To speak English naturally, you need descriptive adjectives. Here are three powerful adjectives to describe successful people:
