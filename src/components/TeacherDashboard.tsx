@@ -5,7 +5,9 @@ import {
   Lesson, 
   Vocabulary, 
   LiveSession,
-  ChatMessage
+  ChatMessage,
+  ResourceOrTip,
+  RecordedLesson
 } from "../types";
 import { 
   getTeachers, 
@@ -19,15 +21,24 @@ import {
   deleteVocabulary,
   saveLiveSession,
   deleteLiveSession,
-  addChatMessage,
-  getChatHistory,
+  subscribeToStudents,
+  subscribeToTeachers,
+  subscribeToAllStudents,
   updateStudent,
   deleteStudent,
   getAnnouncements,
   saveAnnouncement,
-  deleteAnnouncement
+  deleteAnnouncement,
+  saveResourceOrTip,
+  deleteResourceOrTip,
+  subscribeToResourcesAndTips,
+  purgeEntireSystem,
+  saveRecordedLesson,
+  deleteRecordedLesson,
+  subscribeToRecordedLessons
 } from "../lib/dbService";
 import { Announcement } from "../types";
+import TrainingAdmin from "./TrainingAdmin";
 import { 
   ShieldAlert, 
   ShieldCheck,
@@ -48,7 +59,13 @@ import {
   ChevronUp,
   AlertCircle,
   LogOut,
-  Megaphone
+  Megaphone,
+  Globe,
+  Lightbulb,
+  ExternalLink,
+  Search,
+  Gamepad2,
+  PlayCircle
 } from "lucide-react";
 
 interface TeacherDashboardProps {
@@ -72,7 +89,58 @@ export default function TeacherDashboard({
 }: TeacherDashboardProps) {
   const [teachers, setTeachers] = useState<Teacher[]>([]);
   const [students, setStudents] = useState<Student[]>([]);
-  const [activeTab, setActiveTab] = useState<"lessons" | "vocab" | "live" | "students" | "announcements">("lessons");
+  const [activeTab, setActiveTab] = useState<"lessons" | "vocab" | "live" | "recorded_lessons" | "students" | "announcements" | "resources" | "tips" | "training">("lessons");
+  const [studentSearchQuery, setStudentSearchQuery] = useState("");
+
+  // Scroll to top on activeTab change
+  useEffect(() => {
+    window.scrollTo({ top: 0, behavior: "instant" as any });
+  }, [activeTab]);
+
+  // Recorded Lessons states
+  const [recordedLessonsList, setRecordedLessonsList] = useState<RecordedLesson[]>([]);
+  const [showRecordedForm, setShowRecordedForm] = useState(false);
+  const [editRecordedLessonId, setEditRecordedLessonId] = useState<string | null>(null);
+  const [recordedForm, setRecordedForm] = useState({
+    title: "",
+    topic: "",
+    level: "A1" as any,
+    order: 1,
+    videoUrl: ""
+  });
+
+  useEffect(() => {
+    const unsubscribe = subscribeToRecordedLessons((items) => {
+      setRecordedLessonsList(items);
+    });
+    return unsubscribe;
+  }, []);
+
+  // Resources and Tips states
+  const [resourcesTipsList, setResourcesTipsList] = useState<ResourceOrTip[]>([]);
+  const [showResourceForm, setShowResourceForm] = useState(false);
+  const [editResourceId, setEditResourceId] = useState<string | null>(null);
+  const [resourceForm, setResourceForm] = useState({
+    title: "",
+    url: "",
+    content: "",
+    level: "All" as any
+  });
+
+  const [showTipForm, setShowTipForm] = useState(false);
+  const [editTipId, setEditTipId] = useState<string | null>(null);
+  const [tipForm, setTipForm] = useState({
+    title: "",
+    content: "",
+    level: "All" as any
+  });
+
+  useEffect(() => {
+    const unsubscribe = subscribeToResourcesAndTips((items) => {
+      setResourcesTipsList(items);
+    });
+    return unsubscribe;
+  }, []);
 
   // Announcements tab state
   const [announcementsList, setAnnouncementsList] = useState<Announcement[]>([]);
@@ -99,6 +167,26 @@ export default function TeacherDashboard({
   const [showAdminLoginModal, setShowAdminLoginModal] = useState(false);
   const [adminCodeInput, setAdminCodeInput] = useState("");
   const [adminLoginError, setAdminLoginError] = useState(false);
+
+  // Student Management states for Admin
+  const [allStudents, setAllStudents] = useState<Student[]>([]);
+  const [adminStudentSearchQuery, setAdminStudentSearchQuery] = useState("");
+  const [studentLevelFilter, setStudentLevelFilter] = useState("All");
+  const [studentTeacherFilter, setStudentTeacherFilter] = useState("All");
+  const [studentEditLoading, setStudentEditLoading] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!isAdminMode) return;
+    
+    // Subscribe to all students for real-time updates
+    const unsubscribe = subscribeToAllStudents((studentsList) => {
+      setAllStudents(studentsList);
+    });
+    
+    return () => {
+      unsubscribe();
+    };
+  }, [isAdminMode]);
 
   // Add content forms toggles & details
   const [showLessonForm, setShowLessonForm] = useState(false);
@@ -137,24 +225,20 @@ export default function TeacherDashboard({
     link: ""
   });
 
-  // Student messaging chat state
+  // Student details panel state
   const [selectedStudentForChat, setSelectedStudentForChat] = useState<Student | null>(null);
-  const [chatHistory, setChatHistory] = useState<ChatMessage[]>([]);
-  const [teacherReplyInput, setTeacherReplyInput] = useState("");
-  const [sendingReply, setSendingReply] = useState(false);
 
   useEffect(() => {
-    getTeachers().then(setTeachers);
+    const unsubTeachers = subscribeToTeachers(setTeachers);
+    let unsubStudents = () => {};
     if (currentTeacher) {
-      getAllStudents(currentTeacher.uid).then(setStudents);
+      unsubStudents = subscribeToStudents(currentTeacher.uid, setStudents);
     }
+    return () => {
+      unsubTeachers();
+      unsubStudents();
+    };
   }, [currentTeacher]);
-
-  useEffect(() => {
-    if (selectedStudentForChat) {
-      getChatHistory(selectedStudentForChat.uid).then(setChatHistory);
-    }
-  }, [selectedStudentForChat]);
 
   // Admin managers
   const handleVerifyAdminSubmit = (e: React.FormEvent) => {
@@ -195,6 +279,51 @@ export default function TeacherDashboard({
     }
   };
 
+  const handleResetAllData = async () => {
+    const confirmReset = window.confirm(
+      isArabic
+        ? "تنبيه هام جداً: هل أنت متأكد بنسبة 100% من حذف كافة الحسابات والبيانات من قاعدة البيانات نهائياً؟ سيتم تصفير النظام بالكامل ولن تكون قادراً على استرجاع أي بيانات."
+        : "CRITICAL WARNING: Are you 100% sure you want to purge all accounts, students, and custom teacher records from the database permanently? This action cannot be undone."
+    );
+    if (!confirmReset) return;
+
+    try {
+      await purgeEntireSystem();
+      alert(
+        isArabic
+          ? "تم تصفير قاعدة البيانات بنجاح وحذف كافة الحسابات. سيتم إعادة تحميل الصفحة الآن لتهيئة النظام الجديد."
+          : "System database purged and all accounts successfully cleared. Reloading page now to initialize pristine setup."
+      );
+      window.location.reload();
+    } catch (e) {
+      console.error(e);
+      alert("Error: " + e);
+    }
+  };
+
+  const handleUpdateStudentField = async (
+    targetStudent: Student, 
+    fields: Partial<Student>
+  ) => {
+    setStudentEditLoading(targetStudent.uid);
+    try {
+      const updated: Student = {
+        ...targetStudent,
+        ...fields
+      };
+      
+      const newTeacherId = fields.selectedTeacherId !== undefined 
+        ? fields.selectedTeacherId 
+        : (targetStudent.selectedTeacherId || "teacher-sarah");
+        
+      await updateStudent(updated, newTeacherId);
+    } catch (err) {
+      console.error("Failed to update student field:", err);
+    } finally {
+      setStudentEditLoading(null);
+    }
+  };
+
   // Create Teacher
   const handleCreateTeacher = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -224,6 +353,91 @@ export default function TeacherDashboard({
 
     // Select the newly created teacher automatically
     onSelectTeacher(created);
+  };
+
+  // ================= RECORDED LESSONS MANAGEMENT ACTIONS =================
+  const handleSaveRecordedLessonSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const rId = editRecordedLessonId || `rec_${Date.now()}`;
+    const lessonToSave: RecordedLesson = {
+      id: rId,
+      title: recordedForm.title,
+      topic: recordedForm.topic,
+      level: recordedForm.level,
+      order: Number(recordedForm.order),
+      videoUrl: recordedForm.videoUrl,
+      createdAt: new Date().toISOString()
+    };
+    await saveRecordedLesson(lessonToSave, currentTeacher?.uid);
+    setShowRecordedForm(false);
+    setEditRecordedLessonId(null);
+    setRecordedForm({ title: "", topic: "", level: "A1", order: 1, videoUrl: "" });
+  };
+
+  const handleDeleteRecordedLesson = async (id: string) => {
+    if (confirm(isArabic ? "هل أنت متأكد من حذف هذه الحصة المسجلة؟" : "Are you sure you want to delete this recorded lesson?")) {
+      await deleteRecordedLesson(id, currentTeacher?.uid);
+    }
+  };
+
+  const handleStartEditRecordedLesson = (lesson: RecordedLesson) => {
+    setEditRecordedLessonId(lesson.id);
+    setRecordedForm({
+      title: lesson.title,
+      topic: lesson.topic,
+      level: lesson.level,
+      order: lesson.order,
+      videoUrl: lesson.videoUrl
+    });
+    setShowRecordedForm(true);
+  };
+
+  // ================= RESOURCES & TIPS MANAGEMENT ACTIONS =================
+  const handleSaveResourceSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const rId = editResourceId || `resource_${Date.now()}`;
+    const resourceToSave: ResourceOrTip = {
+      id: rId,
+      type: "resource",
+      title: resourceForm.title,
+      url: resourceForm.url,
+      content: resourceForm.content,
+      level: resourceForm.level,
+      createdAt: new Date().toISOString()
+    };
+    await saveResourceOrTip(resourceToSave, currentTeacher?.uid);
+    setShowResourceForm(false);
+    setEditResourceId(null);
+    setResourceForm({ title: "", url: "", content: "", level: "All" });
+  };
+
+  const handleDeleteResource = async (id: string) => {
+    if (confirm(isArabic ? "هل أنت متأكد من حذف هذا المصدر؟" : "Are you sure you want to delete this resource?")) {
+      await deleteResourceOrTip(id, currentTeacher?.uid);
+    }
+  };
+
+  const handleSaveTipSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const tId = editTipId || `tip_${Date.now()}`;
+    const tipToSave: ResourceOrTip = {
+      id: tId,
+      type: "tip",
+      title: tipForm.title,
+      content: tipForm.content,
+      level: tipForm.level,
+      createdAt: new Date().toISOString()
+    };
+    await saveResourceOrTip(tipToSave, currentTeacher?.uid);
+    setShowTipForm(false);
+    setEditTipId(null);
+    setTipForm({ title: "", content: "", level: "All" });
+  };
+
+  const handleDeleteTip = async (id: string) => {
+    if (confirm(isArabic ? "هل أنت متأكد من حذف هذه النصيحة؟" : "Are you sure you want to delete this tip?")) {
+      await deleteResourceOrTip(id, currentTeacher?.uid);
+    }
   };
 
   // Add or Edit Lesson
@@ -365,7 +579,7 @@ export default function TeacherDashboard({
       time: liveForm.time,
       link: liveForm.link,
       status: "upcoming",
-      teacherName: currentTeacher.name || "Professor Thomas",
+      teacherName: currentTeacher.name || "Professor Sarah",
       createdAt: new Date().toISOString()
     };
 
@@ -408,32 +622,6 @@ export default function TeacherDashboard({
       if (selectedStudentForChat?.uid === studentUid) {
         setSelectedStudentForChat(null);
       }
-    }
-  };
-
-  // Send Message reply to Student
-  const handleSendTeacherReply = async () => {
-    if (!selectedStudentForChat || !teacherReplyInput.trim() || !currentTeacher) return;
-    setSendingReply(true);
-
-    const chatId = selectedStudentForChat.uid;
-    const replyMsg: ChatMessage = {
-      id: `teacher_reply_${Date.now()}`,
-      senderId: currentTeacher.uid,
-      senderName: currentTeacher.name,
-      senderRole: "teacher",
-      text: teacherReplyInput.trim(),
-      timestamp: new Date().toISOString()
-    };
-
-    try {
-      await addChatMessage(chatId, replyMsg);
-      setChatHistory(prev => [...prev, replyMsg]);
-      setTeacherReplyInput("");
-    } catch (e) {
-      console.error(e);
-    } finally {
-      setSendingReply(false);
     }
   };
 
@@ -483,12 +671,12 @@ export default function TeacherDashboard({
               🛡️ Administrative Core
             </span>
             <h2 className="text-2xl sm:text-3.5xl font-extrabold font-display leading-tight">
-              {isArabic ? "لوحة الأستاذ - PATHWAY ACADEMY" : "Professor Board - PATHWAY ACADEMY"}
+              {isArabic ? "لوحة الأستاذ - Pathway Languages" : "Professor Board - Pathway Languages"}
             </h2>
             <p className="text-neutral-400 text-xs leading-relaxed">
               {isArabic
-                ? "أهلاً بك في البوابة الأكاديمية لمنصة PATHWAY ACADEMY. اختر حسابك للدخول إلى صفحتك الخاصة لإدارة وتعديل مناهجك، فصولك، والدردشة مع طلابك بشكل فوري ودائم."
-                : "Welcome to the PATHWAY ACADEMY Academic Portal. Choose your account below to access your custom space to manage curriculum, virtual classes, and chat with your assigned students."}
+                ? "أهلاً بك في البوابة الأكاديمية لمنصة Pathway Languages. اختر حسابك للدخول إلى صفحتك الخاصة لإدارة وتعديل مناهجك، فصولك، والدردشة مع طلابك بشكل فوري ودائم."
+                : "Welcome to the Pathway Languages Academic Portal. Choose your account below to access your custom space to manage curriculum, virtual classes, and chat with your assigned students."}
             </p>
           </div>
         </div>
@@ -582,7 +770,7 @@ export default function TeacherDashboard({
                     required
                     value={newTeacher.name}
                     onChange={(e) => setNewTeacher({ ...newTeacher, name: e.target.value })}
-                    placeholder="Prof. Thomas"
+                    placeholder="Prof. Sarah"
                     className="w-full px-4 py-3 border border-neutral-250 rounded-2xl text-xs outline-none focus:ring-2 focus:ring-indigo-500 bg-neutral-50/50"
                   />
                 </div>
@@ -596,7 +784,7 @@ export default function TeacherDashboard({
                     required
                     value={newTeacher.email}
                     onChange={(e) => setNewTeacher({ ...newTeacher, email: e.target.value })}
-                    placeholder="thomas@englishpathway.com"
+                    placeholder="sarah@englishpathway.com"
                     className="w-full px-4 py-3 border border-neutral-250 rounded-2xl text-xs outline-none focus:ring-2 focus:ring-indigo-500 bg-neutral-50/50"
                   />
                 </div>
@@ -634,6 +822,219 @@ export default function TeacherDashboard({
                   </button>
                 </div>
               </form>
+            </div>
+          )}
+ 
+          {/* STUDENT MANAGEMENT PAGE FOR ADMIN */}
+          {isAdminMode && (
+            <div className="bg-white border border-slate-200 rounded-3xl p-6 shadow-sm space-y-6 animate-fade-in my-6" id="admin-student-management-section">
+              <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-4 border-b border-slate-100">
+                <div className="text-left rtl:text-right">
+                  <span className="text-[10px] bg-indigo-50 text-indigo-700 font-black px-3 py-1 rounded-full uppercase tracking-wider inline-flex items-center gap-1.5 font-mono mb-1.5 border border-indigo-100">
+                    <Users className="w-3.5 h-3.5" />
+                    {isArabic ? "لوحة التحكم الخاصة بالمدير" : "ADMIN CENTRAL CONTROL"}
+                  </span>
+                  <h3 className="text-lg font-black text-slate-800 font-display">
+                    {isArabic ? "إدارة شؤون الطلاب" : "Student Enrollment & Accounts"}
+                  </h3>
+                  <p className="text-xs text-slate-400 mt-0.5">
+                    {isArabic 
+                      ? "تابع سجل الطلاب، غير المستويات والأساتذة، وقم بتنشيط أو إيقاف الحسابات مباشرة لحظياً." 
+                      : "Manage students, update learning levels, assign tutees, and toggle active status in real-time."}
+                  </p>
+                </div>
+                
+                <div className="flex flex-wrap gap-2 text-xs font-bold font-mono text-slate-500 bg-slate-50 p-2 rounded-2xl border border-slate-100">
+                  <span>{isArabic ? "إجمالي الطلاب:" : "Total Students:"} <span className="text-indigo-600">{allStudents.length}</span></span>
+                  <span className="text-slate-200">|</span>
+                  <span>{isArabic ? "النشطون:" : "Active:"} <span className="text-emerald-600">{allStudents.filter(s => !s.isDisabled).length}</span></span>
+                </div>
+              </div>
+
+              {/* Filters & Search Grid */}
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                {/* Search Box */}
+                <div className="relative">
+                  <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1.5 font-mono">
+                    {isArabic ? "البحث بالاسم أو البريد الإلكتروني" : "Search Student / Email"}
+                  </label>
+                  <input
+                    type="text"
+                    value={adminStudentSearchQuery}
+                    onChange={(e) => setAdminStudentSearchQuery(e.target.value)}
+                    placeholder={isArabic ? "ابحث عن طالب..." : "Search by name or email..."}
+                    className="w-full text-xs p-3 rounded-2xl border border-slate-200 bg-white text-slate-800 placeholder-slate-400 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-all font-semibold"
+                  />
+                </div>
+
+                {/* Level Filter */}
+                <div>
+                  <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1.5 font-mono">
+                    {isArabic ? "تصفية بالمستوى" : "Filter by Level"}
+                  </label>
+                  <select
+                    value={studentLevelFilter}
+                    onChange={(e) => setStudentLevelFilter(e.target.value)}
+                    className="w-full text-xs p-3 rounded-2xl border border-slate-200 bg-white text-slate-700 font-semibold focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-all cursor-pointer"
+                  >
+                    <option value="All">{isArabic ? "جميع المستويات" : "All Levels"}</option>
+                    <option value="A1">A1</option>
+                    <option value="A2">A2</option>
+                    <option value="B1">B1</option>
+                    <option value="B2">B2</option>
+                    <option value="C1">C1</option>
+                    <option value="C2">C2</option>
+                  </select>
+                </div>
+
+                {/* Teacher Filter */}
+                <div>
+                  <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1.5 font-mono">
+                    {isArabic ? "تصفية بالأستاذ المختار" : "Filter by Teacher"}
+                  </label>
+                  <select
+                    value={studentTeacherFilter}
+                    onChange={(e) => setStudentTeacherFilter(e.target.value)}
+                    className="w-full text-xs p-3 rounded-2xl border border-slate-200 bg-white text-slate-700 font-semibold focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-all cursor-pointer"
+                  >
+                    <option value="All">{isArabic ? "جميع الأساتذة" : "All Teachers"}</option>
+                    {teachers.map(t => (
+                      <option key={t.uid} value={t.uid}>{t.name}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              {/* Students Table */}
+              <div className="border border-slate-200 rounded-2xl overflow-hidden shadow-sm bg-white">
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left rtl:text-right text-xs border-collapse">
+                    <thead>
+                      <tr className="bg-slate-50 border-b border-slate-200 text-slate-400 font-black uppercase tracking-wider font-mono">
+                        <th className="p-4">{isArabic ? "الطالب" : "Student"}</th>
+                        <th className="p-4">{isArabic ? "المستوى الحالي" : "Current Level"}</th>
+                        <th className="p-4">{isArabic ? "الأستاذ المختار" : "Assigned Tutor"}</th>
+                        <th className="p-4">{isArabic ? "تاريخ التسجيل" : "Enrolled At"}</th>
+                        <th className="p-4 text-center">{isArabic ? "حالة الحساب" : "Account Status"}</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-150">
+                      {allStudents
+                        .filter(s => {
+                          const query = adminStudentSearchQuery.toLowerCase().trim();
+                          const matchesSearch = !query || 
+                            s.name.toLowerCase().includes(query) || 
+                            s.email.toLowerCase().includes(query);
+                            
+                          const matchesLevel = studentLevelFilter === "All" || s.level === studentLevelFilter;
+                          const matchesTeacher = studentTeacherFilter === "All" || s.selectedTeacherId === studentTeacherFilter;
+                          
+                          return matchesSearch && matchesLevel && matchesTeacher;
+                        })
+                        .map((stud) => {
+                          const isEditing = studentEditLoading === stud.uid;
+                          return (
+                            <tr key={stud.uid} className={`hover:bg-slate-50/50 transition-colors ${stud.isDisabled ? "bg-red-50/20" : ""}`}>
+                              {/* Student Info */}
+                              <td className="p-4">
+                                <div className="flex items-center gap-3">
+                                  <div className="w-9 h-9 rounded-xl bg-indigo-50 text-indigo-700 font-extrabold flex items-center justify-center border border-indigo-100 uppercase shrink-0">
+                                    {stud.name.charAt(0)}
+                                  </div>
+                                  <div className="min-w-0">
+                                    <span className="block font-extrabold text-slate-800 text-xs truncate">{stud.name}</span>
+                                    <span className="text-[10px] text-slate-450 block font-mono truncate">{stud.email}</span>
+                                  </div>
+                                </div>
+                              </td>
+
+                              {/* Student Level */}
+                              <td className="p-4">
+                                <select
+                                  value={stud.level || "A1"}
+                                  disabled={isEditing}
+                                  onChange={(e) => handleUpdateStudentField(stud, { level: e.target.value as any, selectedLevelCode: e.target.value as any })}
+                                  className="text-xs font-bold font-mono text-indigo-700 bg-indigo-50 hover:bg-indigo-100 px-2 py-1 rounded-lg border border-indigo-150 transition-all cursor-pointer focus:ring-1 focus:ring-indigo-500 disabled:opacity-50"
+                                >
+                                  <option value="A1">A1</option>
+                                  <option value="A2">A2</option>
+                                  <option value="B1">B1</option>
+                                  <option value="B2">B2</option>
+                                  <option value="C1">C1</option>
+                                  <option value="C2">C2</option>
+                                </select>
+                              </td>
+
+                              {/* Student Teacher */}
+                              <td className="p-4">
+                                <select
+                                  value={stud.selectedTeacherId || ""}
+                                  disabled={isEditing}
+                                  onChange={(e) => handleUpdateStudentField(stud, { selectedTeacherId: e.target.value })}
+                                  className="text-xs font-bold text-slate-700 bg-slate-100 hover:bg-slate-200 px-2 py-1 rounded-lg border border-slate-200 transition-all cursor-pointer focus:ring-1 focus:ring-slate-400 disabled:opacity-50"
+                                >
+                                  <option value="">{isArabic ? "لم يتم الاختيار" : "Not Assigned"}</option>
+                                  {teachers.map(t => (
+                                    <option key={t.uid} value={t.uid}>{t.name}</option>
+                                  ))}
+                                </select>
+                              </td>
+
+                              {/* Enrolled At Date */}
+                              <td className="p-4 text-slate-450 font-semibold font-mono">
+                                {stud.registrationDate ? new Date(stud.registrationDate).toLocaleDateString(isArabic ? "ar-EG" : "en-US", { year: 'numeric', month: 'short', day: 'numeric' }) : "-"}
+                              </td>
+
+                              {/* Account status toggle */}
+                              <td className="p-4 text-center">
+                                <button
+                                  onClick={() => handleUpdateStudentField(stud, { isDisabled: !stud.isDisabled })}
+                                  disabled={isEditing}
+                                  className={`px-3 py-1.5 rounded-full text-[10px] font-black uppercase tracking-wider transition-all cursor-pointer disabled:opacity-50 ${
+                                    stud.isDisabled 
+                                      ? "bg-rose-50 border border-rose-150 text-rose-600 hover:bg-rose-100/70"
+                                      : "bg-emerald-50 border border-emerald-150 text-emerald-600 hover:bg-emerald-100/70"
+                                  }`}
+                                >
+                                  {stud.isDisabled 
+                                    ? (isArabic ? "موقوف" : "Deactivated") 
+                                    : (isArabic ? "نشط" : "Active")}
+                                </button>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {isAdminMode && (
+            <div className="bg-red-50 border border-red-200 rounded-3xl p-6 text-left rtl:text-right space-y-4 animate-fade-in my-6">
+              <div className="flex items-center gap-3">
+                <ShieldAlert className="w-6 h-6 text-red-600 shrink-0" />
+                <div>
+                  <h4 className="font-extrabold text-neutral-850 text-sm font-display">
+                    {isArabic ? "لوحة تحكم المدير: الحذف الكلي وتصفير النظام" : "Admin Panel: Global Reset & Data Purge"}
+                  </h4>
+                  <p className="text-[11px] text-red-700 mt-0.5">
+                    {isArabic
+                      ? "هذا الإجراء سيقوم بحذف جميع الطلاب، والأساتذة المسجلين (عدا الحسابات الافتراضية)، وكافة الدروس، والبيانات من قاعدة البيانات نهائياً لتهيئة النظام لاستقبال تسجيلات جديدة."
+                      : "This will permanently purge all student accounts, registered teacher profiles, lessons, vocab, lives, and custom records from the database, resetting the platform to a pristine default state."}
+                  </p>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={handleResetAllData}
+                className="bg-red-600 hover:bg-red-700 text-white font-extrabold px-6 py-3 rounded-2xl text-xs sm:text-sm transition-all shadow-md shadow-red-100 cursor-pointer flex items-center gap-2"
+              >
+                <Trash2 className="w-4 h-4" />
+                <span>{isArabic ? "حذف كافة الحسابات والبيانات والبدء من جديد" : "Purge All Accounts & Data"}</span>
+              </button>
             </div>
           )}
 
@@ -891,24 +1292,94 @@ export default function TeacherDashboard({
 
       <div className="space-y-6">
         {/* Tabs for dashboard */}
-        <div className="flex border-b border-neutral-200">
+        <div className="flex flex-wrap border-b border-neutral-200">
           <button
-            onClick={() => setActiveTab("lessons")}
-            className={`flex-1 py-3 text-center text-xs font-bold border-b-2 transition-all ${
-              activeTab === "lessons"
+            onClick={() => setActiveTab("training")}
+            className={`flex-1 min-w-[120px] py-3 text-center text-xs font-bold border-b-2 transition-all ${
+              activeTab === "training"
                 ? "border-indigo-600 text-indigo-600"
                 : "border-transparent text-neutral-400 hover:text-neutral-700"
             }`}
           >
             <div className="flex items-center justify-center gap-1">
-              <BookOpen className="w-4 h-4" />
-              <span>{isArabic ? "الدروس" : "Lessons"}</span>
+              <Gamepad2 className="w-4 h-4" />
+              <span>{isArabic ? "إدارة التدريب" : "Training Management"}</span>
+            </div>
+          </button>
+
+          <button
+            onClick={() => setActiveTab("tips")}
+            className={`flex-1 min-w-[120px] py-3 text-center text-xs font-bold border-b-2 transition-all ${
+              activeTab === "tips"
+                ? "border-indigo-600 text-indigo-600"
+                : "border-transparent text-neutral-400 hover:text-neutral-700"
+            }`}
+          >
+            <div className="flex items-center justify-center gap-1">
+              <Lightbulb className="w-4 h-4" />
+              <span>{isArabic ? "النصائح" : "Tips"}</span>
+            </div>
+          </button>
+
+          <button
+            onClick={() => setActiveTab("resources")}
+            className={`flex-1 min-w-[120px] py-3 text-center text-xs font-bold border-b-2 transition-all ${
+              activeTab === "resources"
+                ? "border-indigo-600 text-indigo-600"
+                : "border-transparent text-neutral-400 hover:text-neutral-700"
+            }`}
+          >
+            <div className="flex items-center justify-center gap-1">
+              <Globe className="w-4 h-4" />
+              <span>{isArabic ? "المصادر" : "Resources"}</span>
+            </div>
+          </button>
+
+          <button
+            onClick={() => setActiveTab("students")}
+            className={`flex-1 min-w-[120px] py-3 text-center text-xs font-bold border-b-2 transition-all ${
+              activeTab === "students"
+                ? "border-indigo-600 text-indigo-600"
+                : "border-transparent text-neutral-400 hover:text-neutral-700"
+            }`}
+          >
+            <div className="flex items-center justify-center gap-1">
+              <Users className="w-4 h-4" />
+              <span>{isArabic ? "الطلاب" : "Students"}</span>
+            </div>
+          </button>
+
+          <button
+            onClick={() => setActiveTab("recorded_lessons")}
+            className={`flex-1 min-w-[120px] py-3 text-center text-xs font-bold border-b-2 transition-all ${
+              activeTab === "recorded_lessons"
+                ? "border-indigo-600 text-indigo-600"
+                : "border-transparent text-neutral-400 hover:text-neutral-700"
+            }`}
+          >
+            <div className="flex items-center justify-center gap-1">
+              <PlayCircle className="w-4 h-4" />
+              <span>{isArabic ? "الحصص المسجلة" : "Recorded Sessions"}</span>
+            </div>
+          </button>
+
+          <button
+            onClick={() => setActiveTab("live")}
+            className={`flex-1 min-w-[120px] py-3 text-center text-xs font-bold border-b-2 transition-all ${
+              activeTab === "live"
+                ? "border-indigo-600 text-indigo-600"
+                : "border-transparent text-neutral-400 hover:text-neutral-700"
+            }`}
+          >
+            <div className="flex items-center justify-center gap-1">
+              <Video className="w-4 h-4" />
+              <span>{isArabic ? "الحصص المباشرة" : "Live Sessions"}</span>
             </div>
           </button>
 
           <button
             onClick={() => setActiveTab("vocab")}
-            className={`flex-1 py-3 text-center text-xs font-bold border-b-2 transition-all ${
+            className={`flex-1 min-w-[120px] py-3 text-center text-xs font-bold border-b-2 transition-all ${
               activeTab === "vocab"
                 ? "border-indigo-600 text-indigo-600"
                 : "border-transparent text-neutral-400 hover:text-neutral-700"
@@ -920,34 +1391,221 @@ export default function TeacherDashboard({
             </div>
           </button>
 
-                <button
-                  onClick={() => setActiveTab("live")}
-                  className={`flex-1 py-3 text-center text-xs font-bold border-b-2 transition-all ${
-                    activeTab === "live"
-                      ? "border-indigo-600 text-indigo-600"
-                      : "border-transparent text-neutral-400 hover:text-neutral-700"
-                  }`}
-                >
-                  <div className="flex items-center justify-center gap-1">
-                    <Video className="w-4 h-4" />
-                    <span>{isArabic ? "الحصص المباشرة" : "Live Class"}</span>
-                  </div>
-                </button>
+          <button
+            onClick={() => setActiveTab("lessons")}
+            className={`flex-1 min-w-[120px] py-3 text-center text-xs font-bold border-b-2 transition-all ${
+              activeTab === "lessons"
+                ? "border-indigo-600 text-indigo-600"
+                : "border-transparent text-neutral-400 hover:text-neutral-700"
+            }`}
+          >
+            <div className="flex items-center justify-center gap-1">
+              <BookOpen className="w-4 h-4" />
+              <span>{isArabic ? "الدروس" : "Lessons"}</span>
+            </div>
+          </button>
+        </div>
 
-                <button
-                  onClick={() => setActiveTab("students")}
-                  className={`flex-1 py-3 text-center text-xs font-bold border-b-2 transition-all ${
-                    activeTab === "students"
-                      ? "border-indigo-600 text-indigo-600"
-                      : "border-transparent text-neutral-400 hover:text-neutral-700"
-                  }`}
-                >
-                  <div className="flex items-center justify-center gap-1">
-                    <Users className="w-4 h-4" />
-                    <span>{isArabic ? "إدارة الطلاب" : "Students"}</span>
+              {/* TAB: RECORDED LESSONS MANAGEMENT */}
+              {activeTab === "recorded_lessons" && (
+                <div className="space-y-6">
+                  {/* Recorded Lesson Form */}
+                  {showRecordedForm ? (
+                    <form onSubmit={handleSaveRecordedLessonSubmit} className="bg-white border border-neutral-200 rounded-2xl p-5 space-y-4">
+                      <h4 className="font-extrabold text-xs text-rose-600 uppercase tracking-wider">
+                        {editRecordedLessonId ? (isArabic ? "تعديل الحصة المسجلة" : "Edit Recorded Lesson") : (isArabic ? "إضافة حصة مسجلة جديدة" : "Create Recorded Lesson")}
+                      </h4>
+
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                          <label className="block text-xs font-semibold text-neutral-700 mb-1">
+                            {isArabic ? "عنوان الدرس أو الحصة:" : "Lesson/Session Title:"}
+                          </label>
+                          <input
+                            type="text"
+                            required
+                            value={recordedForm.title}
+                            onChange={(e) => setRecordedForm({ ...recordedForm, title: e.target.value })}
+                            placeholder={isArabic ? "مثال: شرح أزمنة المستقبل البسيط" : "Example: Future Simple Explanations"}
+                            className="w-full px-3 py-2 border border-neutral-250 rounded-xl text-xs outline-none focus:ring-2 focus:ring-rose-500 bg-neutral-50/50"
+                          />
+                        </div>
+
+                        <div>
+                          <label className="block text-xs font-semibold text-neutral-700 mb-1">
+                            {isArabic ? "موضوع الدرس (أو التصنيف):" : "Topic or Category:"}
+                          </label>
+                          <input
+                            type="text"
+                            required
+                            value={recordedForm.topic}
+                            onChange={(e) => setRecordedForm({ ...recordedForm, topic: e.target.value })}
+                            placeholder={isArabic ? "مثال: القواعد التأسيسية" : "Example: English Grammar basics"}
+                            className="w-full px-3 py-2 border border-neutral-250 rounded-xl text-xs outline-none focus:ring-2 focus:ring-rose-500 bg-neutral-50/50"
+                          />
+                        </div>
+
+                        <div>
+                          <label className="block text-xs font-semibold text-neutral-700 mb-1">
+                            {isArabic ? "المستوى الدراسي:" : "Pathway Level:"}
+                          </label>
+                          <select
+                            value={recordedForm.level}
+                            onChange={(e) => setRecordedForm({ ...recordedForm, level: e.target.value as any })}
+                            className="w-full px-3 py-2 border border-neutral-250 rounded-xl text-xs outline-none focus:ring-2 focus:ring-rose-500 bg-neutral-50/50"
+                          >
+                            <option value="A1">A1</option>
+                            <option value="A2">A2</option>
+                            <option value="B1">B1</option>
+                            <option value="B2">B2</option>
+                            <option value="C1">C1</option>
+                            <option value="C2">C2</option>
+                          </select>
+                        </div>
+
+                        <div>
+                          <label className="block text-xs font-semibold text-neutral-700 mb-1">
+                            {isArabic ? "ترتيب الظهور في القائمة:" : "Display Order index:"}
+                          </label>
+                          <input
+                            type="number"
+                            required
+                            min={1}
+                            value={recordedForm.order}
+                            onChange={(e) => setRecordedForm({ ...recordedForm, order: Number(e.target.value) })}
+                            className="w-full px-3 py-2 border border-neutral-250 rounded-xl text-xs outline-none focus:ring-2 focus:ring-rose-500 bg-neutral-50/50"
+                          />
+                        </div>
+
+                        <div className="md:col-span-2">
+                          <label className="block text-xs font-semibold text-neutral-700 mb-1">
+                            {isArabic ? "رابط الفيديو (YouTube أو أي منصة أخرى):" : "Video URL (YouTube, Vimeo, etc.):"}
+                          </label>
+                          <input
+                            type="url"
+                            required
+                            value={recordedForm.videoUrl}
+                            onChange={(e) => setRecordedForm({ ...recordedForm, videoUrl: e.target.value })}
+                            placeholder="https://www.youtube.com/watch?v=..."
+                            className="w-full px-3 py-2 border border-neutral-250 rounded-xl text-xs outline-none focus:ring-2 focus:ring-rose-500 bg-neutral-50/50 font-mono"
+                          />
+                        </div>
+                      </div>
+
+                      <div className="flex justify-end gap-2 pt-2">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setShowRecordedForm(false);
+                            setEditRecordedLessonId(null);
+                            setRecordedForm({ title: "", topic: "", level: "A1", order: 1, videoUrl: "" });
+                          }}
+                          className="bg-neutral-100 hover:bg-neutral-200 text-neutral-700 font-bold px-4 py-2 rounded-xl text-xs transition-colors cursor-pointer"
+                        >
+                          {isArabic ? "إلغاء" : "Cancel"}
+                        </button>
+                        <button
+                          type="submit"
+                          className="bg-rose-600 hover:bg-rose-700 text-white font-bold px-4 py-2 rounded-xl text-xs transition-colors shadow-sm cursor-pointer"
+                        >
+                          {isArabic ? "حفظ الحصة" : "Save Lesson"}
+                        </button>
+                      </div>
+                    </form>
+                  ) : (
+                    <div className="flex justify-between items-center bg-white border border-neutral-200 rounded-2xl p-4 shadow-xs">
+                      <div>
+                        <h4 className="font-extrabold text-sm text-neutral-800">
+                          {isArabic ? "إدارة أرشيف الحصص المسجلة للطلاب" : "Recorded Class Library Control"}
+                        </h4>
+                        <p className="text-xs text-neutral-400 mt-0.5">
+                          {isArabic
+                            ? "أضف، عدل أو احذف مقاطع الشرح المسجلة التي تظهر للطلاب حسب مستوياتهم."
+                            : "Add, modify or delete recorded class videos available for students based on active levels."}
+                        </p>
+                      </div>
+
+                      <button
+                        onClick={() => setShowRecordedForm(true)}
+                        className="flex items-center gap-1.5 bg-rose-600 hover:bg-rose-700 text-white font-bold px-4 py-2.5 rounded-xl text-xs transition-colors cursor-pointer shadow-md shadow-rose-100"
+                      >
+                        <Plus className="w-4 h-4" />
+                        <span>{isArabic ? "إضافة حصة مسجلة جديدة" : "Add Recorded Lesson"}</span>
+                      </button>
+                    </div>
+                  )}
+
+                  {/* Recorded Lessons Table / List */}
+                  <div className="bg-white border border-neutral-200 rounded-2xl overflow-hidden shadow-sm">
+                    <div className="p-4 bg-neutral-50 border-b border-neutral-200">
+                      <span className="text-xs font-black text-neutral-700 uppercase tracking-wider font-mono">
+                        {isArabic ? "قائمة الحصص المسجلة المتوفرة حالياً" : "Current Recorded Lessons List"}
+                      </span>
+                    </div>
+
+                    {recordedLessonsList.length > 0 ? (
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-left rtl:text-right border-collapse text-xs">
+                          <thead>
+                            <tr className="bg-neutral-50/50 border-b border-neutral-200 text-neutral-500 uppercase font-black text-[10px] tracking-wider font-mono">
+                              <th className="p-4">{isArabic ? "الترتيب" : "Order"}</th>
+                              <th className="p-4">{isArabic ? "العنوان" : "Title"}</th>
+                              <th className="p-4">{isArabic ? "الموضوع" : "Topic"}</th>
+                              <th className="p-4">{isArabic ? "المستوى" : "Level"}</th>
+                              <th className="p-4">{isArabic ? "رابط الفيديو" : "Video URL"}</th>
+                              <th className="p-4 text-center">{isArabic ? "إجراءات" : "Actions"}</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-neutral-150">
+                            {recordedLessonsList.map((lesson) => (
+                              <tr key={lesson.id} className="hover:bg-neutral-50/40 transition-colors">
+                                <td className="p-4 font-mono font-bold text-neutral-600">#{lesson.order}</td>
+                                <td className="p-4 font-extrabold text-neutral-800">{lesson.title}</td>
+                                <td className="p-4 text-neutral-500 font-semibold">{lesson.topic}</td>
+                                <td className="p-4 font-mono">
+                                  <span className="bg-rose-50 text-rose-700 font-black px-2 py-0.5 rounded border border-rose-100">
+                                    {lesson.level}
+                                  </span>
+                                </td>
+                                <td className="p-4 font-mono text-neutral-450 truncate max-w-[180px]">
+                                  <a href={lesson.videoUrl} target="_blank" rel="noopener noreferrer" className="text-indigo-600 hover:underline flex items-center gap-1">
+                                    <span>{lesson.videoUrl}</span>
+                                    <ExternalLink className="w-3 h-3 shrink-0" />
+                                  </a>
+                                </td>
+                                <td className="p-4">
+                                  <div className="flex items-center justify-center gap-1.5">
+                                    <button
+                                      onClick={() => handleStartEditRecordedLesson(lesson)}
+                                      className="p-1.5 text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors cursor-pointer"
+                                      title={isArabic ? "تعديل" : "Edit"}
+                                    >
+                                      <Edit className="w-3.5 h-3.5" />
+                                    </button>
+                                    <button
+                                      onClick={() => handleDeleteRecordedLesson(lesson.id)}
+                                      className="p-1.5 text-rose-600 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer"
+                                      title={isArabic ? "حذف" : "Delete"}
+                                    >
+                                      <Trash2 className="w-3.5 h-3.5" />
+                                    </button>
+                                  </div>
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    ) : (
+                      <div className="text-center py-10 text-neutral-400 font-medium">
+                        {isArabic
+                          ? "لا توجد أي حصص مسجلة مضافة حالياً في قاعدة البيانات."
+                          : "No pre-recorded videos exist in the database yet."}
+                      </div>
+                    )}
                   </div>
-                </button>
-              </div>
+                </div>
+              )}
 
               {/* TAB 1: LESSONS MANAGEMENT */}
               {activeTab === "lessons" && (
@@ -1712,7 +2370,7 @@ export default function TeacherDashboard({
                       className="w-full flex items-center justify-center gap-2 bg-purple-50 hover:bg-purple-100 border border-purple-200 text-purple-700 font-bold py-3 rounded-2xl text-xs transition-all"
                     >
                       <Plus className="w-4 h-4" />
-                      <span>{isArabic ? "جدولة حصة بسب مباشر جديدة" : "Schedule New Live Broadcast"}</span>
+                      <span>{isArabic ? "جدولة حصة بث مباشر جديدة" : "Schedule New Live Broadcast"}</span>
                     </button>
                   )}
 
@@ -1740,241 +2398,538 @@ export default function TeacherDashboard({
                   </div>
                 </div>
               )}
-
-              {/* TAB 4: STUDENTS LIST & INTERACTIVE MESSAGING */}
               {activeTab === "students" && (
-                <div className="space-y-6">
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                    {/* List of registered students */}
-                    <div className="space-y-4">
-                      <h4 className="font-bold text-neutral-800 text-xs font-display pb-1 border-b border-neutral-100">
-                        {isArabic ? "جميع الطلاب المسجلين" : "Registered Students Database"}
+                <div className="space-y-6" id="students-tab-panel">
+                  {/* Student Management Header */}
+                  <div className="bg-gradient-to-r from-indigo-50 to-purple-50 rounded-2xl p-5 border border-indigo-100 flex flex-col md:flex-row md:items-center justify-between gap-4">
+                    <div className="space-y-1">
+                      <h4 className="font-extrabold text-neutral-800 text-xs font-display uppercase tracking-wider flex items-center gap-2">
+                        <Users className="w-4 h-4 text-indigo-600" />
+                        {isArabic ? "لوحة إدارة الطلاب" : "Student Management Board"}
                       </h4>
+                      <p className="text-[11px] text-indigo-700">
+                        {isArabic 
+                          ? "عرض وإدارة جميع طلابك المسجلين، وتحديث مستوياتهم، أو تعطيل وحذف حساباتهم مباشرة."
+                          : "View and manage all your assigned students, update their study levels, or temporarily disable and delete accounts."}
+                      </p>
+                    </div>
 
-                      <div className="space-y-3 max-h-[500px] overflow-y-auto pr-1">
-                        {students.map((studentItem) => {
-                          const isSelected = selectedStudentForChat?.uid === studentItem.uid;
-                          return (
-                            <div
-                              key={studentItem.uid}
-                              className={`w-full text-left rtl:text-right p-4 rounded-xl border transition-all flex flex-col gap-3 ${
-                                isSelected
-                                  ? "border-indigo-400 bg-indigo-50/20"
-                                  : "border-neutral-200/70 bg-white hover:border-neutral-300"
-                              }`}
-                            >
-                              <div className="flex justify-between items-start w-full">
-                                <div 
-                                  className="text-left rtl:text-right cursor-pointer flex-1"
-                                  onClick={() => setSelectedStudentForChat(studentItem)}
-                                >
-                                  <span className="block font-extrabold text-neutral-900 text-xs hover:text-indigo-600 transition-colors">
-                                    {studentItem.name} {studentItem.isDisabled && (
-                                      <span className="text-[10px] text-red-500 font-bold bg-red-50 px-1.5 py-0.5 rounded ml-1 rtl:mr-1">
-                                        {isArabic ? "معطل" : "Disabled"}
-                                      </span>
-                                    )}
-                                  </span>
-                                  <span className="text-[10px] text-neutral-400 font-mono leading-none block mt-0.5">
+                    <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 w-full md:w-auto">
+                      {/* Search Bar */}
+                      <div className="relative flex-1 sm:w-64">
+                        <input
+                          type="text"
+                          value={studentSearchQuery}
+                          onChange={(e) => setStudentSearchQuery(e.target.value)}
+                          placeholder={isArabic ? "ابحث بالاسم أو البريد الإلكتروني..." : "Search by name or email..."}
+                          className="w-full pl-8 pr-3 py-1.5 border border-slate-200 rounded-xl text-xs bg-white outline-none focus:ring-2 focus:ring-indigo-500 text-slate-700"
+                        />
+                        <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-2.5" />
+                      </div>
+
+                      <span className="text-xs bg-indigo-50 text-indigo-700 px-3 py-1.5 rounded-xl font-mono font-bold text-center shrink-0 border border-indigo-100">
+                        {students.length} {isArabic ? "طلاب مسجلين" : "Registered Students"}
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Student Cards Grid */}
+                  {(() => {
+                    const filteredStudents = students.filter(s => {
+                      const query = studentSearchQuery.toLowerCase().trim();
+                      if (!query) return true;
+                      return (
+                        s.name?.toLowerCase().includes(query) ||
+                        s.email?.toLowerCase().includes(query)
+                      );
+                    });
+
+                    if (filteredStudents.length === 0) {
+                      return (
+                        <div className="bg-white border border-slate-150 rounded-3xl p-16 text-center text-slate-400 shadow-sm">
+                          <Users className="w-12 h-12 text-slate-200 mx-auto mb-3" />
+                          <h5 className="font-bold text-slate-700 text-sm mb-1">
+                            {isArabic ? "لا يوجد نتائج مطابقة للبحث" : "No matching students found"}
+                          </h5>
+                          <p className="text-xs text-slate-400">
+                            {isArabic ? "تأكد من كتابة الاسم أو البريد الإلكتروني بشكل صحيح." : "Double-check the spelling or try searching for another student."}
+                          </p>
+                        </div>
+                      );
+                    }
+
+                    return (
+                      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                        {filteredStudents.map((studentItem) => (
+                          <div
+                            key={studentItem.uid}
+                            className={`bg-white border rounded-3xl p-6 shadow-xs hover:shadow-md transition-all duration-300 flex flex-col justify-between space-y-5 relative ${
+                              studentItem.isDisabled 
+                                ? "border-red-100 bg-red-50/5" 
+                                : "border-slate-200 bg-white"
+                            }`}
+                          >
+                            {/* Card Header (Name, Email, Status) */}
+                            <div className="space-y-3">
+                              <div className="flex justify-between items-start gap-3">
+                                <div className="space-y-1 flex-1 min-w-0">
+                                  <h5 className="font-extrabold text-slate-800 text-xs truncate">
+                                    {studentItem.name}
+                                  </h5>
+                                  <p className="text-[10px] text-slate-400 font-mono truncate">
                                     {studentItem.email}
-                                  </span>
+                                  </p>
                                 </div>
 
-                                <div className="flex items-center gap-2">
-                                  <span className="text-[9px] font-bold bg-indigo-50 text-indigo-700 px-2 py-0.5 rounded uppercase">
-                                    {studentItem.level}
-                                  </span>
+                                <div className="shrink-0 flex items-center gap-1.5">
+                                  {studentItem.isDisabled ? (
+                                    <span className="text-[9px] font-bold text-red-600 bg-red-50 border border-red-105 px-2 py-0.5 rounded-md">
+                                      {isArabic ? "معطل" : "Disabled"}
+                                    </span>
+                                  ) : (
+                                    <span className="text-[9px] font-bold text-emerald-600 bg-emerald-50 border border-emerald-100 px-2 py-0.5 rounded-md">
+                                      {isArabic ? "نشط" : "Active"}
+                                    </span>
+                                  )}
                                 </div>
                               </div>
 
-                              {/* Student management actions */}
-                              <div className="flex flex-col gap-2 border-t border-neutral-100 pt-2 w-full mt-1">
-                                <div className="flex flex-wrap items-center justify-between gap-2">
-                                  <div className="flex items-center gap-1.5">
-                                    <span className="text-[10px] text-neutral-500">
-                                      {isArabic ? "المستوى الحالي:" : "Current Level:"}
-                                    </span>
-                                    <select
-                                      value={studentItem.level}
-                                      onChange={(e) => handleChangeStudentLevel(studentItem, e.target.value as any)}
-                                      className="px-2 py-1 border border-neutral-200 rounded-lg text-[10px] outline-none focus:ring-1 focus:ring-indigo-500 bg-neutral-50"
-                                    >
-                                      <option value="A1">A1</option>
-                                      <option value="A2">A2</option>
-                                      <option value="B1">B1</option>
-                                      <option value="B2">B2</option>
-                                      <option value="C1">C1</option>
-                                      <option value="C2">C2</option>
-                                    </select>
-                                  </div>
-
-                                  <div className="flex gap-1.5">
-                                    {/* Chat button */}
-                                    <button
-                                      onClick={() => setSelectedStudentForChat(studentItem)}
-                                      className={`px-2.5 py-1 rounded-lg text-[10px] font-bold transition-all ${
-                                        isSelected 
-                                          ? "bg-indigo-600 text-white" 
-                                          : "bg-neutral-100 hover:bg-neutral-200 text-neutral-700"
-                                      }`}
-                                    >
-                                      {isArabic ? "مراسلة" : "Chat"}
-                                    </button>
-
-                                    {/* Toggle Disable button */}
-                                    <button
-                                      onClick={() => handleToggleStudentDisabled(studentItem)}
-                                      className={`px-2.5 py-1 rounded-lg text-[10px] font-bold transition-all ${
-                                        studentItem.isDisabled
-                                          ? "bg-emerald-50 hover:bg-emerald-100 text-emerald-700"
-                                          : "bg-amber-50 hover:bg-amber-100 text-amber-700"
-                                      }`}
-                                    >
-                                      {studentItem.isDisabled 
-                                        ? (isArabic ? "تفعيل الحساب" : "Enable")
-                                        : (isArabic ? "تعطيل الحساب" : "Disable")
-                                      }
-                                    </button>
-
-                                    {/* Delete student button */}
-                                    <button
-                                      onClick={() => handleDeleteStudent(studentItem.uid)}
-                                      className="p-1 text-neutral-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-all"
-                                      title={isArabic ? "حذف الحساب" : "Delete Account"}
-                                    >
-                                      <Trash2 className="w-3.5 h-3.5" />
-                                    </button>
-                                  </div>
-                                </div>
-
-                                {/* Dynamic Level Unlock Control */}
-                                <div className="bg-neutral-50 p-2 rounded-xl space-y-1.5">
-                                  <span className="text-[10px] font-bold text-neutral-500 block">
-                                    {isArabic ? "التحكم بالمستويات المفتوحة للطالب:" : "Control Student's Unlocked Levels:"}
+                              {/* Student Badges Info (Language, Level, Tutor) */}
+                              <div className="grid grid-cols-2 gap-2 text-[10px] bg-slate-50 p-3 rounded-2xl border border-slate-100">
+                                <div className="space-y-0.5">
+                                  <span className="text-slate-400 block text-[9px]">{isArabic ? "اللغة:" : "Language:"}</span>
+                                  <span className="font-bold text-slate-700 flex items-center gap-1">
+                                    🇬🇧 {studentItem.selectedLanguage || "English"}
                                   </span>
-                                  <div className="flex flex-wrap gap-1">
-                                    {(["A1", "A2", "B1", "B2", "C1", "C2"] as const).map(lvl => {
-                                      const isUnlocked = studentItem.unlockedLevels?.includes(lvl) ?? (lvl === "A1" || lvl === studentItem.level);
-                                      return (
-                                        <button
-                                          key={lvl}
-                                          type="button"
-                                          onClick={async () => {
-                                            if (!currentTeacher) return;
-                                            let nextUnlocked = studentItem.unlockedLevels ? [...studentItem.unlockedLevels] : ["A1", studentItem.level];
-                                            if (isUnlocked) {
-                                              // Prevent locking A1 to avoid empty states
-                                              if (lvl === "A1") return;
-                                              nextUnlocked = nextUnlocked.filter(l => l !== lvl);
-                                            } else {
-                                              nextUnlocked = [...nextUnlocked, lvl];
-                                            }
-                                            nextUnlocked = Array.from(new Set(nextUnlocked));
-                                            const updated = { ...studentItem, unlockedLevels: nextUnlocked };
-                                            await updateStudent(updated, currentTeacher.uid);
-                                            const updatedList = await getAllStudents(currentTeacher.uid);
-                                            setStudents(updatedList);
-                                          }}
-                                          className={`px-2 py-1 rounded text-[10px] font-bold border transition-all ${
-                                            isUnlocked 
-                                              ? "bg-emerald-50 border-emerald-200 text-emerald-700" 
-                                              : "bg-slate-50 border-slate-200 text-slate-400 hover:border-slate-300"
-                                          }`}
-                                        >
-                                          {lvl} {isUnlocked ? "✓" : "✗"}
-                                        </button>
-                                      );
-                                    })}
+                                </div>
+                                <div className="space-y-0.5">
+                                  <span className="text-slate-400 block text-[9px]">{isArabic ? "الأستاذ:" : "Teacher:"}</span>
+                                  <span className="font-bold text-slate-700 truncate block">
+                                    {studentItem.selectedTeacherName || "Sarah"}
+                                  </span>
+                                </div>
+                                <div className="space-y-0.5 col-span-2 border-t border-slate-200/60 pt-1.5 mt-1">
+                                  <div className="flex justify-between items-center">
+                                    <span className="text-slate-400 block text-[9px]">{isArabic ? "المستوى الدراسي الحالي:" : "Current level:"}</span>
+                                    <span className="font-extrabold text-indigo-600 font-mono text-[11px] bg-indigo-50 px-2 py-0.5 rounded">
+                                      {studentItem.level}
+                                    </span>
                                   </div>
                                 </div>
                               </div>
                             </div>
-                          );
-                        })}
-                      </div>
-                    </div>
 
-                    {/* Chat messaging panel to write to the selected student */}
-                    <div className="bg-white border border-neutral-200 rounded-2xl p-5 shadow-sm space-y-4 flex flex-col justify-between h-[500px]">
-                      {selectedStudentForChat ? (
-                        <div className="flex flex-col justify-between h-full overflow-hidden">
-                          {/* Chat header */}
-                          <div className="pb-3 border-b border-neutral-150 shrink-0">
-                            <span className="text-[10px] uppercase font-bold text-indigo-500">
-                              {isArabic ? "محادثة الطالب" : "Messaging with Student:"}
-                            </span>
-                            <h5 className="font-extrabold text-neutral-800 text-sm">
-                              {selectedStudentForChat.name}
-                            </h5>
-                          </div>
-
-                          {/* Message List */}
-                          <div className="flex-1 overflow-y-auto py-3 space-y-3 my-2 bg-neutral-50/50 rounded-xl p-3">
-                            {chatHistory.length > 0 ? (
-                              chatHistory.map((msg) => {
-                                const isTeacherMsg = msg.senderRole === "teacher";
-                                return (
-                                  <div
-                                    key={msg.id}
-                                    className={`flex flex-col max-w-[80%] ${
-                                      isTeacherMsg ? "ml-auto" : "mr-auto text-left"
-                                    }`}
-                                  >
-                                    <span className="text-[8px] text-neutral-400 px-1 font-mono">
-                                      {msg.senderName}
-                                    </span>
-                                    <div className={`p-2.5 rounded-xl text-xs mt-0.5 ${
-                                      isTeacherMsg
-                                        ? "bg-indigo-600 text-white rounded-tr-none"
-                                        : "bg-white border border-neutral-200 text-neutral-800 rounded-tl-none"
-                                    }`}>
-                                      {msg.text}
-                                    </div>
-                                  </div>
-                                );
-                              })
-                            ) : (
-                              <div className="text-center text-neutral-400 text-xs py-8">
-                                <MessageSquare className="w-8 h-8 text-neutral-200 mx-auto mb-2" />
-                                <p>{isArabic ? "لا توجد رسائل سابقة مع هذا الطالب." : "No messages found with this student."}</p>
+                            {/* Card Controls & Actions (Level dropdown, Disable, Delete) */}
+                            <div className="space-y-3.5 border-t border-slate-100 pt-4">
+                              {/* Level Change Selector */}
+                              <div className="flex items-center justify-between gap-3 w-full">
+                                <span className="text-[11px] font-bold text-slate-500">
+                                  {isArabic ? "تغيير المستوى الدراسي:" : "Update Study Level:"}
+                                </span>
+                                <select
+                                  value={studentItem.level}
+                                  onChange={(e) => handleChangeStudentLevel(studentItem, e.target.value as any)}
+                                  className="px-2.5 py-1.5 border border-slate-200 rounded-xl text-xs outline-none focus:ring-2 focus:ring-indigo-500 bg-slate-50 font-extrabold text-slate-700 cursor-pointer"
+                                >
+                                  <option value="A1">A1</option>
+                                  <option value="A2">A2</option>
+                                  <option value="B1">B1</option>
+                                  <option value="B2">B2</option>
+                                  <option value="C1">C1</option>
+                                  <option value="C2">C2</option>
+                                </select>
                               </div>
-                            )}
-                          </div>
 
-                          {/* Chat input footer */}
-                          <div className="pt-2 border-t border-neutral-100 flex gap-2 shrink-0">
-                            <input
-                              type="text"
-                              value={teacherReplyInput}
-                              onChange={(e) => setTeacherReplyInput(e.target.value)}
-                              onKeyDown={(e) => {
-                                if (e.key === "Enter") handleSendTeacherReply();
-                              }}
-                              placeholder={isArabic ? "اكتب رد الأستاذ هنا..." : "Type teacher response here..."}
-                              className="flex-1 px-3 py-2 border border-neutral-200 rounded-xl text-xs outline-none focus:ring-2 focus:ring-indigo-500"
-                            />
-                            <button
-                              onClick={handleSendTeacherReply}
-                              disabled={sendingReply || !teacherReplyInput.trim()}
-                              className="bg-indigo-600 hover:bg-indigo-700 text-white p-2.5 rounded-xl transition-all disabled:opacity-50"
-                            >
-                              <Send className="w-4 h-4" />
-                            </button>
+                              {/* Toggle & Delete buttons */}
+                              <div className="flex gap-2.5">
+                                <button
+                                  onClick={() => handleToggleStudentDisabled(studentItem)}
+                                  className={`flex-1 py-2 rounded-xl text-xs font-bold transition-all border text-center cursor-pointer ${
+                                    studentItem.isDisabled
+                                      ? "bg-emerald-50 hover:bg-emerald-100 border-emerald-200 text-emerald-700"
+                                      : "bg-amber-50 hover:bg-amber-100 border-amber-200 text-amber-800"
+                                  }`}
+                                >
+                                  {studentItem.isDisabled
+                                    ? (isArabic ? "تفعيل الحساب" : "Enable Account")
+                                    : (isArabic ? "تعطيل الحساب" : "Disable Account")
+                                  }
+                                </button>
+
+                                <button
+                                  onClick={() => handleDeleteStudent(studentItem.uid)}
+                                  className="bg-rose-50 hover:bg-rose-100 border border-rose-100 text-rose-700 p-2 rounded-xl text-xs font-bold transition-all text-center flex items-center justify-center gap-1.5 cursor-pointer"
+                                  title={isArabic ? "حذف الحساب نهائياً" : "Delete Account Permanently"}
+                                >
+                                  <Trash2 className="w-4 h-4" />
+                                  <span>{isArabic ? "حذف" : "Delete"}</span>
+                                </button>
+                              </div>
+                            </div>
                           </div>
+                        ))}
+                      </div>
+                    );
+                  })()}
+                </div>
+              )}
+
+              {/* TAB 5: RESOURCES MANAGEMENT */}
+              {activeTab === "resources" && (
+                <div className="space-y-6">
+                  {/* Resource Form */}
+                  {showResourceForm ? (
+                    <form onSubmit={handleSaveResourceSubmit} className="bg-white border border-neutral-200 rounded-2xl p-5 space-y-4">
+                      <h4 className="font-extrabold text-xs text-indigo-600 uppercase tracking-wider">
+                        {editResourceId ? (isArabic ? "تعديل المصدر" : "Edit Resource") : (isArabic ? "إضافة مصدر جديد" : "Create Resource")}
+                      </h4>
+
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                          <label className="block text-xs font-semibold text-neutral-700 mb-1">
+                            {isArabic ? "عنوان المصدر" : "Resource Title"}
+                          </label>
+                          <input
+                            type="text"
+                            required
+                            value={resourceForm.title}
+                            onChange={(e) => setResourceForm({ ...resourceForm, title: e.target.value })}
+                            className="w-full px-3 py-2 border border-neutral-200 rounded-xl text-xs outline-none focus:ring-2 focus:ring-indigo-500"
+                            placeholder={isArabic ? "مثال: قاموس أكسفورد" : "e.g. Oxford Dictionary"}
+                          />
                         </div>
-                      ) : (
-                        <div className="text-center py-20 text-neutral-400 flex flex-col justify-center items-center h-full">
-                          <MessageSquare className="w-10 h-10 text-neutral-200 mb-2" />
-                          <p className="text-xs max-w-[200px]">
-                            {isArabic
-                              ? "الرجاء تحديد طالب من القائمة لعرض تاريخ المحادثات ومراسلته."
-                              : "Select a student from the list to synchronize direct messaging logs."}
-                          </p>
+
+                        <div>
+                          <label className="block text-xs font-semibold text-neutral-700 mb-1">
+                            {isArabic ? "رابط المصدر (URL)" : "Resource Link (URL)"}
+                          </label>
+                          <input
+                            type="url"
+                            value={resourceForm.url}
+                            onChange={(e) => setResourceForm({ ...resourceForm, url: e.target.value })}
+                            className="w-full px-3 py-2 border border-neutral-200 rounded-xl text-xs outline-none focus:ring-2 focus:ring-indigo-500"
+                            placeholder="https://..."
+                          />
                         </div>
-                      )}
+
+                        <div className="md:col-span-2">
+                          <label className="block text-xs font-semibold text-neutral-700 mb-1">
+                            {isArabic ? "وصف المصدر أو محتواه" : "Resource Description"}
+                          </label>
+                          <textarea
+                            required
+                            rows={3}
+                            value={resourceForm.content}
+                            onChange={(e) => setResourceForm({ ...resourceForm, content: e.target.value })}
+                            className="w-full px-3 py-2 border border-neutral-200 rounded-xl text-xs outline-none focus:ring-2 focus:ring-indigo-500"
+                            placeholder={isArabic ? "اكتب تفاصيل مختصرة عن فائدة هذا المصدر..." : "Describe how this resource helps students..."}
+                          />
+                        </div>
+
+                        <div>
+                          <label className="block text-xs font-semibold text-neutral-700 mb-1">
+                            {isArabic ? "المستوى المستهدف" : "Target Level"}
+                          </label>
+                          <select
+                            value={resourceForm.level}
+                            onChange={(e) => setResourceForm({ ...resourceForm, level: e.target.value as any })}
+                            className="w-full px-3 py-2 border border-neutral-200 rounded-xl text-xs bg-white outline-none focus:ring-2 focus:ring-indigo-500"
+                          >
+                            <option value="All">{isArabic ? "جميع المستويات (All)" : "All Levels"}</option>
+                            <option value="A1">A1</option>
+                            <option value="A2">A2</option>
+                            <option value="B1">B1</option>
+                            <option value="B2">B2</option>
+                            <option value="C1">C1</option>
+                          </select>
+                        </div>
+                      </div>
+
+                      <div className="flex justify-end gap-2 pt-2">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setShowResourceForm(false);
+                            setEditResourceId(null);
+                          }}
+                          className="px-4 py-2 border border-neutral-200 rounded-xl text-xs text-neutral-500 hover:bg-neutral-50"
+                        >
+                          {isArabic ? "إلغاء" : "Cancel"}
+                        </button>
+                        <button
+                          type="submit"
+                          className="px-4 py-2 bg-indigo-600 text-white rounded-xl text-xs font-bold hover:bg-indigo-700"
+                        >
+                          {isArabic ? "حفظ" : "Save Resource"}
+                        </button>
+                      </div>
+                    </form>
+                  ) : (
+                    <div className="flex justify-between items-center bg-white border border-neutral-200 rounded-2xl p-4 shadow-sm">
+                      <div>
+                        <h4 className="font-extrabold text-sm text-neutral-800">
+                          {isArabic ? "المصادر والمواقع التعليمية" : "Educational Resources"}
+                        </h4>
+                        <p className="text-[10px] text-neutral-450 mt-0.5">
+                          {isArabic ? "إضافة وتعديل المواقع التي تظهر للطلاب في قسم المصادر" : "Manage links and materials shown in student Services Portal"}
+                        </p>
+                      </div>
+                      <button
+                        onClick={() => {
+                          setEditResourceId(null);
+                          setResourceForm({ title: "", url: "", content: "", level: "All" });
+                          setShowResourceForm(true);
+                        }}
+                        className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold px-3 py-2 rounded-xl text-xs transition-all flex items-center gap-1 cursor-pointer animate-none"
+                      >
+                        <Plus className="w-4 h-4" />
+                        <span>{isArabic ? "إضافة مصدر" : "Add Resource"}</span>
+                      </button>
                     </div>
+                  )}
+
+                  {/* Resources List Table */}
+                  <div className="bg-white border border-neutral-200 rounded-2xl overflow-hidden shadow-sm">
+                    <table className="w-full text-left rtl:text-right border-collapse">
+                      <thead>
+                        <tr className="bg-neutral-50 border-b border-neutral-150 text-[10px] font-bold text-neutral-450 uppercase tracking-wider">
+                          <th className="p-4">{isArabic ? "المصدر" : "Resource"}</th>
+                          <th className="p-4">{isArabic ? "المستوى" : "Level"}</th>
+                          <th className="p-4">{isArabic ? "الوصف" : "Description"}</th>
+                          <th className="p-4 text-center">{isArabic ? "خيارات" : "Actions"}</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-neutral-150 text-xs text-neutral-700">
+                        {resourcesTipsList.filter(x => x.type === "resource").length === 0 ? (
+                          <tr>
+                            <td colSpan={4} className="p-8 text-center text-neutral-400">
+                              {isArabic ? "لا توجد مصادر مضافة حالياً." : "No resources added yet."}
+                            </td>
+                          </tr>
+                        ) : (
+                          resourcesTipsList.filter(x => x.type === "resource").map((item) => (
+                            <tr key={item.id} className="hover:bg-neutral-50/50">
+                              <td className="p-4 font-bold text-neutral-900">
+                                {item.url ? (
+                                  <a href={item.url} target="_blank" rel="noopener noreferrer" className="text-indigo-600 hover:underline inline-flex items-center gap-1">
+                                    {item.title}
+                                    <ExternalLink className="w-3 h-3" />
+                                  </a>
+                                ) : (
+                                  item.title
+                                )}
+                              </td>
+                              <td className="p-4">
+                                <span className="bg-neutral-100 text-neutral-600 px-2 py-0.5 rounded font-bold">
+                                  {item.level}
+                                </span>
+                              </td>
+                              <td className="p-4 max-w-xs truncate" title={item.content}>
+                                {item.content}
+                              </td>
+                              <td className="p-4">
+                                <div className="flex items-center justify-center gap-2">
+                                  <button
+                                    onClick={() => {
+                                      setEditResourceId(item.id);
+                                      setResourceForm({
+                                        title: item.title,
+                                        url: item.url || "",
+                                        content: item.content,
+                                        level: item.level as any
+                                      });
+                                      setShowResourceForm(true);
+                                    }}
+                                    className="p-1.5 text-blue-600 hover:bg-blue-50 rounded-lg transition-all cursor-pointer"
+                                  >
+                                    <Edit className="w-4 h-4" />
+                                  </button>
+                                  <button
+                                    onClick={() => handleDeleteResource(item.id)}
+                                    className="p-1.5 text-red-500 hover:bg-red-50 rounded-lg transition-all cursor-pointer"
+                                  >
+                                    <Trash2 className="w-4 h-4" />
+                                  </button>
+                                </div>
+                              </td>
+                            </tr>
+                          ))
+                        )}
+                      </tbody>
+                    </table>
                   </div>
                 </div>
+              )}
+
+              {/* TAB 6: TIPS MANAGEMENT */}
+              {activeTab === "tips" && (
+                <div className="space-y-6">
+                  {/* Tip Form */}
+                  {showTipForm ? (
+                    <form onSubmit={handleSaveTipSubmit} className="bg-white border border-neutral-200 rounded-2xl p-5 space-y-4">
+                      <h4 className="font-extrabold text-xs text-indigo-600 uppercase tracking-wider">
+                        {editTipId ? (isArabic ? "تعديل النصيحة" : "Edit Tip") : (isArabic ? "إضافة نصيحة جديدة" : "Create Tip")}
+                      </h4>
+
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div className="md:col-span-2">
+                          <label className="block text-xs font-semibold text-neutral-700 mb-1">
+                            {isArabic ? "عنوان النصيحة" : "Tip Title"}
+                          </label>
+                          <input
+                            type="text"
+                            required
+                            value={tipForm.title}
+                            onChange={(e) => setTipForm({ ...tipForm, title: e.target.value })}
+                            className="w-full px-3 py-2 border border-neutral-200 rounded-xl text-xs outline-none focus:ring-2 focus:ring-indigo-500"
+                            placeholder={isArabic ? "مثال: ممارسة التحدث اليومي" : "e.g. Daily Speaking Habit"}
+                          />
+                        </div>
+
+                        <div className="md:col-span-2">
+                          <label className="block text-xs font-semibold text-neutral-700 mb-1">
+                            {isArabic ? "محتوى النصيحة بالتفصيل" : "Tip Content"}
+                          </label>
+                          <textarea
+                            required
+                            rows={5}
+                            value={tipForm.content}
+                            onChange={(e) => setTipForm({ ...tipForm, content: e.target.value })}
+                            className="w-full px-3 py-2 border border-neutral-200 rounded-xl text-xs outline-none focus:ring-2 focus:ring-indigo-500"
+                            placeholder={isArabic ? "اكتب النصيحة والخطوات العملية للطلاب..." : "Write detailed steps or golden advice for students..."}
+                          />
+                        </div>
+
+                        <div>
+                          <label className="block text-xs font-semibold text-neutral-700 mb-1">
+                            {isArabic ? "المستوى المستهدف" : "Target Level"}
+                          </label>
+                          <select
+                            value={tipForm.level}
+                            onChange={(e) => setTipForm({ ...tipForm, level: e.target.value as any })}
+                            className="w-full px-3 py-2 border border-neutral-200 rounded-xl text-xs bg-white outline-none focus:ring-2 focus:ring-indigo-500"
+                          >
+                            <option value="All">{isArabic ? "جميع المستويات (All)" : "All Levels"}</option>
+                            <option value="A1">A1</option>
+                            <option value="A2">A2</option>
+                            <option value="B1">B1</option>
+                            <option value="B2">B2</option>
+                            <option value="C1">C1</option>
+                          </select>
+                        </div>
+                      </div>
+
+                      <div className="flex justify-end gap-2 pt-2">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setShowTipForm(false);
+                            setEditTipId(null);
+                          }}
+                          className="px-4 py-2 border border-neutral-200 rounded-xl text-xs text-neutral-500 hover:bg-neutral-50"
+                        >
+                          {isArabic ? "إلغاء" : "Cancel"}
+                        </button>
+                        <button
+                          type="submit"
+                          className="px-4 py-2 bg-indigo-600 text-white rounded-xl text-xs font-bold hover:bg-indigo-700"
+                        >
+                          {isArabic ? "حفظ" : "Save Tip"}
+                        </button>
+                      </div>
+                    </form>
+                  ) : (
+                    <div className="flex justify-between items-center bg-white border border-neutral-200 rounded-2xl p-4 shadow-sm">
+                      <div>
+                        <h4 className="font-extrabold text-sm text-neutral-800">
+                          {isArabic ? "النصائح والإرشادات الاستراتيجية" : "Study Tips & Instructions"}
+                        </h4>
+                        <p className="text-[10px] text-neutral-450 mt-0.5">
+                          {isArabic ? "إضافة وتحديث النصائح الموصى بها للطلاب لتعزيز الفهم والاستيعاب" : "Manage study recommendations shown in student Services Portal"}
+                        </p>
+                      </div>
+                      <button
+                        onClick={() => {
+                          setEditTipId(null);
+                          setTipForm({ title: "", content: "", level: "All" });
+                          setShowTipForm(true);
+                        }}
+                        className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold px-3 py-2 rounded-xl text-xs transition-all flex items-center gap-1 cursor-pointer"
+                      >
+                        <Plus className="w-4 h-4" />
+                        <span>{isArabic ? "إضافة نصيحة" : "Add Tip"}</span>
+                      </button>
+                    </div>
+                  )}
+
+                  {/* Tips List Table */}
+                  <div className="bg-white border border-neutral-200 rounded-2xl overflow-hidden shadow-sm">
+                    <table className="w-full text-left rtl:text-right border-collapse">
+                      <thead>
+                        <tr className="bg-neutral-50 border-b border-neutral-150 text-[10px] font-bold text-neutral-450 uppercase tracking-wider">
+                          <th className="p-4">{isArabic ? "العنوان" : "Title"}</th>
+                          <th className="p-4">{isArabic ? "المستوى" : "Level"}</th>
+                          <th className="p-4">{isArabic ? "النصيحة" : "Tip Content"}</th>
+                          <th className="p-4 text-center">{isArabic ? "خيارات" : "Actions"}</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-neutral-150 text-xs text-neutral-700">
+                        {resourcesTipsList.filter(x => x.type === "tip").length === 0 ? (
+                          <tr>
+                            <td colSpan={4} className="p-8 text-center text-neutral-400">
+                              {isArabic ? "لا توجد نصائح مضافة حالياً." : "No study tips added yet."}
+                            </td>
+                          </tr>
+                        ) : (
+                          resourcesTipsList.filter(x => x.type === "tip").map((item) => (
+                            <tr key={item.id} className="hover:bg-neutral-50/50">
+                              <td className="p-4 font-bold text-neutral-900">
+                                {item.title}
+                              </td>
+                              <td className="p-4">
+                                <span className="bg-neutral-100 text-neutral-600 px-2 py-0.5 rounded font-bold">
+                                  {item.level}
+                                </span>
+                              </td>
+                              <td className="p-4 max-w-sm truncate" title={item.content}>
+                                {item.content}
+                              </td>
+                              <td className="p-4">
+                                <div className="flex items-center justify-center gap-2">
+                                  <button
+                                    onClick={() => {
+                                      setEditTipId(item.id);
+                                      setTipForm({
+                                        title: item.title,
+                                        content: item.content,
+                                        level: item.level as any
+                                      });
+                                      setShowTipForm(true);
+                                    }}
+                                    className="p-1.5 text-blue-600 hover:bg-blue-50 rounded-lg transition-all cursor-pointer"
+                                  >
+                                    <Edit className="w-4 h-4" />
+                                  </button>
+                                  <button
+                                    onClick={() => handleDeleteTip(item.id)}
+                                    className="p-1.5 text-red-500 hover:bg-red-50 rounded-lg transition-all cursor-pointer"
+                                  >
+                                    <Trash2 className="w-4 h-4" />
+                                  </button>
+                                </div>
+                              </td>
+                            </tr>
+                          ))
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+
+              {/* TAB: TRAINING GAME MANAGEMENT */}
+              {activeTab === "training" && (
+                <TrainingAdmin isArabic={isArabic} currentTeacher={currentTeacher} />
               )}
       </div>
     </div>

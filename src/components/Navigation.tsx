@@ -52,7 +52,7 @@ export default function Navigation({
             id="logo-brand-btn"
           >
             <span className="block text-lg sm:text-xl font-black font-display tracking-wider text-slate-800 hover:text-indigo-650 transition-colors uppercase">
-              PATHWAY <span className="text-indigo-600">ACADEMY</span>
+              Pathway <span className="text-indigo-600">Languages</span>
             </span>
           </button>
 

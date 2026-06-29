@@ -3,7 +3,6 @@ import Navigation from "./components/Navigation";
 import LessonsSection from "./components/LessonsSection";
 import VocabularySection from "./components/VocabularySection";
 import LiveClassesSection from "./components/LiveClassesSection";
-import ContactTeacherSection from "./components/ContactTeacherSection";
 import ProfileSection from "./components/ProfileSection";
 import TeacherDashboard from "./components/TeacherDashboard";
 import AuthModal from "./components/AuthModal";
@@ -12,8 +11,12 @@ import SidebarMenu from "./components/SidebarMenu";
 import DailyTasksSection from "./components/DailyTasksSection";
 import WeeklyTasksSection from "./components/WeeklyTasksSection";
 import AboutUsSection from "./components/AboutUsSection";
+import ResourcesSection from "./components/ResourcesSection";
+import TipsSection from "./components/TipsSection";
+import TrainingSection from "./components/TrainingSection";
+import RecordedLessonsSection from "./components/RecordedLessonsSection";
 
-import { Student, Teacher, Lesson, Vocabulary, LiveSession, Announcement } from "./types";
+import { Student, Teacher, Lesson, Vocabulary, LiveSession, Announcement, ResourceOrTip } from "./types";
 import { 
   getLessons, 
   getVocabulary, 
@@ -21,7 +24,13 @@ import {
   getStudentProfile, 
   saveStudentProfile,
   clearAllTeachers,
-  getAnnouncements
+  getAnnouncements,
+  subscribeToStudentProfile,
+  subscribeToResourcesAndTips,
+  subscribeToLessons,
+  subscribeToVocabulary,
+  subscribeToLiveSessions,
+  subscribeToAnnouncements
 } from "./lib/dbService";
 
 import { 
@@ -37,7 +46,17 @@ import {
   HelpCircle,
   Megaphone,
   Calendar,
-  MessageSquare
+  MessageSquare,
+  Play,
+  Pause,
+  Save,
+  FileText,
+  ExternalLink,
+  Info,
+  Plus,
+  Edit,
+  Trash2,
+  PlayCircle
 } from "lucide-react";
 import { motion } from "motion/react";
 
@@ -63,14 +82,248 @@ export default function App() {
   const [vocabulary, setVocabulary] = useState<Vocabulary[]>([]);
   const [liveSessions, setLiveSessions] = useState<LiveSession[]>([]);
   const [announcements, setAnnouncements] = useState<Announcement[]>([]);
+  const [resourcesAndTips, setResourcesAndTips] = useState<ResourceOrTip[]>([]);
+
+  // Scroll to top on tab change
+  useEffect(() => {
+    window.scrollTo({ top: 0, behavior: "instant" as any });
+  }, [currentTab]);
+
+  // Subscriptions for student and resources
+  useEffect(() => {
+    if (student?.uid) {
+      const unsubscribe = subscribeToStudentProfile(student.uid, (updatedProfile) => {
+        if (updatedProfile.isDisabled) {
+          setStudent(null);
+          localStorage.removeItem("ep_student_profile");
+          alert(isArabic ? "هذا الحساب معطل حالياً من قبل الأستاذ." : "This account is currently disabled by the teacher.");
+        } else {
+          setStudent(updatedProfile);
+        }
+      });
+      return unsubscribe;
+    }
+  }, [student?.uid]);
+
+  useEffect(() => {
+    const activeTeacherId = currentTeacher ? currentTeacher.uid : (student?.selectedTeacherId || "teacher-sarah");
+
+    const unsubResources = subscribeToResourcesAndTips((items) => {
+      setResourcesAndTips(items);
+    }, activeTeacherId);
+
+    const unsubLessons = subscribeToLessons((list) => {
+      setLessons(list);
+    }, activeTeacherId);
+
+    const unsubVocab = subscribeToVocabulary((list) => {
+      setVocabulary(list);
+    }, activeTeacherId);
+
+    const unsubLives = subscribeToLiveSessions((list) => {
+      setLiveSessions(list);
+    }, activeTeacherId);
+
+    const unsubAnnouncements = subscribeToAnnouncements((list) => {
+      setAnnouncements(list);
+    }, activeTeacherId);
+
+    return () => {
+      unsubResources();
+      unsubLessons();
+      unsubVocab();
+      unsubLives();
+      unsubAnnouncements();
+    };
+  }, [student?.selectedTeacherId, currentTeacher?.uid]);
+
+  // ================= STUDY SESSION & TIME REMAINING STATES =================
+  const [timeRemaining, setTimeRemaining] = useState<string>("");
+
+  useEffect(() => {
+    const updateTimeRemaining = () => {
+      const now = new Date();
+      const midnight = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
+      const diff = midnight.getTime() - now.getTime();
+      if (diff <= 0) {
+        setTimeRemaining("00:00:00");
+        return;
+      }
+      const h = Math.floor(diff / (1000 * 60 * 60));
+      const m = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
+      const s = Math.floor((diff % (1000 * 60)) / 1000);
+      const pad = (v: number) => String(v).padStart(2, "0");
+      setTimeRemaining(`${pad(h)}:${pad(m)}:${pad(s)}`);
+    };
+
+    updateTimeRemaining();
+    const interval = setInterval(updateTimeRemaining, 1000);
+    return () => clearInterval(interval);
+  }, []);
+
+  const [isStudying, setIsStudying] = useState<boolean>(false);
+  const [studyElapsedSeconds, setStudyElapsedSeconds] = useState<number>(0);
+  const [saveNotesSuccess, setSaveNotesSuccess] = useState<boolean>(false);
+
+  useEffect(() => {
+    let interval: NodeJS.Timeout | null = null;
+    if (isStudying) {
+      interval = setInterval(() => {
+        setStudyElapsedSeconds(prev => prev + 1);
+      }, 1000);
+    } else {
+      if (interval) clearInterval(interval);
+    }
+    return () => {
+      if (interval) clearInterval(interval);
+    };
+  }, [isStudying]);
+
+  const formatDuration = (totalSeconds: number) => {
+    const h = Math.floor(totalSeconds / 3600);
+    const m = Math.floor((totalSeconds % 3600) / 60);
+    const s = totalSeconds % 60;
+    const pad = (v: number) => String(v).padStart(2, "0");
+    return `${pad(h)}:${pad(m)}:${pad(s)}`;
+  };
+
+  const handleStartStudy = () => {
+    setIsStudying(true);
+    setStudyElapsedSeconds(0);
+  };
+
+  const handleStopStudy = async () => {
+    if (!isStudying || !student) return;
+    setIsStudying(false);
+    const addedSeconds = studyElapsedSeconds;
+    setStudyElapsedSeconds(0);
+
+    const updatedStudent: Student = {
+      ...student,
+      studySecondsToday: (student.studySecondsToday || 0) + addedSeconds,
+      studySecondsThisWeek: (student.studySecondsThisWeek || 0) + addedSeconds,
+      studySecondsTotal: (student.studySecondsTotal || 0) + addedSeconds,
+    };
+    await handleUpdateStudent(updatedStudent);
+  };
+
+  const handleSaveStudySession = async () => {
+    if (!student || studyElapsedSeconds === 0) return;
+    setIsStudying(false);
+    const addedSeconds = studyElapsedSeconds;
+    setStudyElapsedSeconds(0);
+
+    const updatedStudent: Student = {
+      ...student,
+      studySecondsToday: (student.studySecondsToday || 0) + addedSeconds,
+      studySecondsThisWeek: (student.studySecondsThisWeek || 0) + addedSeconds,
+      studySecondsTotal: (student.studySecondsTotal || 0) + addedSeconds,
+    };
+    await handleUpdateStudent(updatedStudent);
+  };
+
+  const [studentNotes, setStudentNotes] = useState<string>("");
+
+  useEffect(() => {
+    if (student) {
+      setStudentNotes(student.notes || "");
+    }
+  }, [student?.uid]);
+
+  const handleSaveNotes = async (customNotes?: string) => {
+    if (!student) return;
+    const finalNotes = customNotes !== undefined ? customNotes : studentNotes;
+    const updatedStudent: Student = {
+      ...student,
+      notes: finalNotes
+    };
+    await handleUpdateStudent(updatedStudent);
+    setSaveNotesSuccess(true);
+    setTimeout(() => setSaveNotesSuccess(false), 2000);
+  };
+
+  // States for Errors & Obstacles
+  const [showErrorObstacleForm, setShowErrorObstacleForm] = useState<boolean>(false);
+  const [editingErrorObstacleId, setEditingErrorObstacleId] = useState<string | null>(null);
+  const [formErrorCommitted, setFormErrorCommitted] = useState<string>("");
+  const [formDifficultyFaced, setFormDifficultyFaced] = useState<string>("");
+  const [formHowResolved, setFormHowResolved] = useState<string>("");
+
+  const handleSaveErrorObstacle = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!student) return;
+
+    const currentList = student.errorObstacles || [];
+    let updatedList: any[] = [];
+
+    if (editingErrorObstacleId) {
+      // Edit mode
+      updatedList = currentList.map(item => {
+        if (item.id === editingErrorObstacleId) {
+          return {
+            ...item,
+            errorCommitted: formErrorCommitted,
+            difficultyFaced: formDifficultyFaced,
+            howResolved: formHowResolved,
+          };
+        }
+        return item;
+      });
+    } else {
+      // Create mode
+      const newItem = {
+        id: "err-obs-" + Date.now().toString(36),
+        errorCommitted: formErrorCommitted,
+        difficultyFaced: formDifficultyFaced,
+        howResolved: formHowResolved,
+        createdAt: new Date().toISOString()
+      };
+      updatedList = [newItem, ...currentList];
+    }
+
+    const updatedStudent: Student = {
+      ...student,
+      errorObstacles: updatedList
+    };
+
+    await handleUpdateStudent(updatedStudent);
+    
+    // Reset form
+    setShowErrorObstacleForm(false);
+    setEditingErrorObstacleId(null);
+    setFormErrorCommitted("");
+    setFormDifficultyFaced("");
+    setFormHowResolved("");
+  };
+
+  const handleStartEditErrorObstacle = (item: any) => {
+    setEditingErrorObstacleId(item.id);
+    setFormErrorCommitted(item.errorCommitted);
+    setFormDifficultyFaced(item.difficultyFaced);
+    setFormHowResolved(item.howResolved);
+    setShowErrorObstacleForm(true);
+  };
+
+  const handleDeleteErrorObstacle = async (id: string) => {
+    if (!student) return;
+    const currentList = student.errorObstacles || [];
+    const updatedList = currentList.filter(item => item.id !== id);
+
+    const updatedStudent: Student = {
+      ...student,
+      errorObstacles: updatedList
+    };
+
+    await handleUpdateStudent(updatedStudent);
+  };
 
   // Load curriculum from database on start
   const fetchCurriculumData = async (teacherId?: string) => {
-    const targetId = teacherId || currentTeacher?.uid || "teacher-thomas";
+    const targetId = teacherId || currentTeacher?.uid || "teacher-sarah";
     const lList = await getLessons(targetId);
     const vList = await getVocabulary(targetId);
     const sList = await getLiveSessions(targetId);
-    const aList = await getAnnouncements();
+    const aList = await getAnnouncements(targetId);
     setLessons(lList);
     setVocabulary(vList);
     setLiveSessions(sList);
@@ -79,16 +332,16 @@ export default function App() {
 
   useEffect(() => {
     // One-time teacher database reset check to empty states as requested
-    const hasResetTeachers = localStorage.getItem("ep_teachers_reset_v4");
+    const hasResetTeachers = localStorage.getItem("ep_teachers_reset_v5");
     if (!hasResetTeachers) {
       clearAllTeachers().then(() => {
-        localStorage.setItem("ep_teachers_reset_v4", "true");
+        localStorage.setItem("ep_teachers_reset_v5", "true");
         window.location.reload();
       });
       return;
     }
 
-    let activeTeacherId = "teacher-thomas";
+    let activeTeacherId = "teacher-sarah";
     const cachedTeacher = localStorage.getItem("ep_current_teacher");
     if (cachedTeacher) {
       try {
@@ -108,8 +361,9 @@ export default function App() {
       try {
         const parsed = JSON.parse(cachedUser);
         if (parsed && parsed.uid) {
-          // Re-sync with database under the active teacher
-          getStudentProfile(parsed.uid, parsed.name, parsed.email, activeTeacherId).then((profile) => {
+          // Re-sync with database under their assigned teacher
+          const studentTeacherId = parsed.selectedTeacherId || activeTeacherId;
+          getStudentProfile(parsed.uid, parsed.name, parsed.email, studentTeacherId).then((profile) => {
             if (profile.isDisabled) {
               setStudent(null);
               localStorage.removeItem("ep_student_profile");
@@ -128,13 +382,13 @@ export default function App() {
   // Update Student state and sync to database
   const handleUpdateStudent = async (updatedStudent: Student) => {
     setStudent(updatedStudent);
-    const targetId = currentTeacher?.uid || "teacher-thomas";
+    const targetId = updatedStudent.selectedTeacherId || currentTeacher?.uid || "teacher-sarah";
     await saveStudentProfile(updatedStudent, targetId);
   };
 
   // Google/Sandbox Auth success
   const handleAuthSuccess = async (uid: string, name: string, email: string) => {
-    const targetId = currentTeacher?.uid || "teacher-thomas";
+    const targetId = currentTeacher?.uid || "teacher-sarah";
     const profile = await getStudentProfile(uid, name, email, targetId);
     if (profile.isDisabled) {
       alert(isArabic ? "هذا الحساب معطل حالياً من قبل الأستاذ." : "This account is currently disabled by the teacher.");
@@ -195,7 +449,7 @@ export default function App() {
       setCurrentTab("teacher");
     } else {
       localStorage.removeItem("ep_current_teacher");
-      fetchCurriculumData("teacher-thomas");
+      fetchCurriculumData("teacher-sarah");
     }
   };
 
@@ -261,99 +515,6 @@ export default function App() {
             id="home-view-container"
           >
             
-            {/* Hero Section */}
-            <div className="grid grid-cols-1 lg:grid-cols-5 gap-8 items-center bg-white border border-slate-200 rounded-3xl p-6 sm:p-10 shadow-lg shadow-slate-100 relative overflow-hidden">
-              <div className="lg:col-span-3 space-y-6 text-left rtl:text-right relative z-10">
-                <div className="inline-flex items-center gap-1.5 bg-indigo-50 text-indigo-700 px-3 py-1 rounded-full text-xs font-semibold border border-indigo-100">
-                  <Sparkles className="w-4 h-4 text-indigo-500 animate-spin" style={{ animationDuration: '3s' }} />
-                  <span>{isArabic ? "تعليم مبتكر ومبسط لجميع المستويات" : "Smart Pathway to English Fluency"}</span>
-                </div>
-
-                <div className="space-y-3">
-                  <h1 className="text-3.5xl sm:text-5xl font-black font-display tracking-tight text-slate-900 leading-tight">
-                    {isArabic ? "طريقك الأسهل لإتقان" : "Your Ultimate Pathway to"}{" "}
-                    <span className="text-transparent bg-clip-text bg-gradient-to-r from-indigo-600 via-indigo-500 to-indigo-700">
-                      {isArabic ? "اللغة الإنجليزية" : "Mastering English"}
-                    </span>
-                  </h1>
-                  <p className="text-slate-600 text-sm sm:text-base leading-relaxed max-w-lg">
-                    {isArabic
-                      ? "منصة English Pathway متخصصة في تدريس اللغة الإنجليزية لجميع المستويات من المبتدئ إلى المتقدم. مع واجهات مريحة، اختبارات لغوية متكاملة، ونظام حواري ذكي لمرافقية إنجازك الدراسي يوماً بيوم."
-                      : "English Pathway is an interactive hub engineered to teach writing, speaking, pronunciation, and reading for levels from Beginner to Advanced. Explore structured lessons and speak with native tutors."}
-                  </p>
-                </div>
-
-                <div className="flex flex-wrap gap-4 pt-2 justify-start">
-                  <button
-                    onClick={() => setCurrentTab("lessons")}
-                    className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white font-extrabold px-6 py-3.5 rounded-2xl text-xs sm:text-sm transition-all shadow-lg shadow-indigo-200 hover:shadow-indigo-300"
-                    id="start-learning-hero-btn"
-                  >
-                    <span>{isArabic ? "ابدأ رحلة التعلم الآن" : "Start Learning Now"}</span>
-                    <ArrowRight className="w-4 h-4" />
-                  </button>
-
-                  <button
-                    onClick={() => setCurrentTab("vocab")}
-                    className="flex items-center gap-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-extrabold px-6 py-3.5 rounded-2xl text-xs sm:text-sm transition-all"
-                  >
-                    <span>{isArabic ? "تصفح بنك المفردات" : "Explore Vocab Bank"}</span>
-                  </button>
-                </div>
-              </div>
-
-              {/* Decorative graphic / stats overview */}
-              <div className="lg:col-span-2 flex justify-center items-center relative min-h-[220px]">
-                <div className="absolute inset-0 bg-gradient-to-tr from-indigo-50 to-indigo-100/40 rounded-3xl -rotate-2 transform scale-95" />
-                <div className="bg-white border border-slate-200 rounded-3xl p-6 shadow-lg rotate-1 transform hover:rotate-0 transition-transform relative z-10 w-full max-w-sm space-y-4">
-                  <div className="flex justify-between items-center pb-2 border-b border-slate-100">
-                    <span className="text-[10px] bg-indigo-50 text-indigo-700 font-bold px-2.5 py-0.5 rounded-full uppercase tracking-wider font-mono">
-                      {isArabic ? "إحصائيات المنصة الكلية" : "Platform Live Stats"}
-                    </span>
-                    <GraduationCap className="w-5 h-5 text-indigo-600" />
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-4">
-                    <div className="text-left rtl:text-right space-y-0.5">
-                      <span className="block text-2xl font-black font-display text-slate-900 font-mono">
-                        {lessons.length || 3}
-                      </span>
-                      <p className="text-[10px] text-slate-400 font-semibold uppercase tracking-wider">
-                        {isArabic ? "دروس حية" : "Active Lessons"}
-                      </p>
-                    </div>
-
-                    <div className="text-left rtl:text-right space-y-0.5">
-                      <span className="block text-2xl font-black font-display text-slate-900 font-mono">
-                        {vocabulary.length || 4}
-                      </span>
-                      <p className="text-[10px] text-slate-400 font-semibold uppercase tracking-wider">
-                        {isArabic ? "كلمات وجمل" : "Vocabulary"}
-                      </p>
-                    </div>
-
-                    <div className="text-left rtl:text-right space-y-0.5">
-                      <span className="block text-2xl font-black font-display text-slate-900 font-mono">
-                        {liveSessions.length || 2}
-                      </span>
-                      <p className="text-[10px] text-slate-400 font-semibold uppercase tracking-wider">
-                        {isArabic ? "حصص قادمة" : "Live Classes"}
-                      </p>
-                    </div>
-
-                    <div className="text-left rtl:text-right space-y-0.5">
-                      <span className="block text-2xl font-black font-display text-slate-900 font-mono">
-                        3
-                      </span>
-                      <p className="text-[10px] text-slate-400 font-semibold uppercase tracking-wider">
-                        {isArabic ? "مستويات" : "Levels"}
-                      </p>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-
             {/* Quick Student Dashboard (Synced Stats Panel) */}
             {student && (
               <div className="bg-white border border-slate-200 rounded-3xl p-6 sm:p-8 shadow-sm space-y-6">
@@ -416,6 +577,299 @@ export default function App() {
                       {isArabic ? "الأيام المتتالية" : "Consecutive Days"}
                     </p>
                   </div>
+                </div>
+              </div>
+            )}
+
+            {/* DAILY TASKS EMBEDDED DIRECTLY BELOW WELCOME STATS BANNER */}
+            {student && (
+              <DailyTasksSection
+                student={student}
+                isArabic={isArabic}
+                onOpenAuth={() => setShowAuthModal(true)}
+                onUpdateStudent={handleUpdateStudent}
+              />
+            )}
+
+            {/* STUDY TIMER & STATISTICS SECTION */}
+            {student && (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                
+                {/* CARD 1: TIME REMAINING TODAY (SHRUNK) */}
+                <div className="bg-white border border-slate-200 rounded-3xl p-5 shadow-sm space-y-4 flex flex-col justify-center">
+                  <div className="flex items-center gap-2.5">
+                    <div className="bg-rose-50 p-2 rounded-xl border border-rose-100 text-rose-600">
+                      <Clock className="w-5 h-5 animate-pulse" />
+                    </div>
+                    <div>
+                      <h3 className="text-sm font-bold text-slate-800 font-display">
+                        {isArabic ? "الوقت المتبقي لليوم" : "Remaining Time Today"}
+                      </h3>
+                      <p className="text-[10px] text-slate-400 mt-0.5">
+                        {isArabic ? "ساعات، دقائق، ثوانٍ حتى منتصف الليل" : "Until midnight"}
+                      </p>
+                    </div>
+                  </div>
+                  
+                  <div className="text-2.5xl sm:text-3.5xl font-black font-mono text-rose-600 bg-rose-50/50 rounded-2xl py-4 text-center tracking-wider border border-rose-100/40">
+                    {timeRemaining || "00:00:00"}
+                  </div>
+                </div>
+
+                {/* CARD 2: CURRENT STUDY SESSION (CLICKABLE CARD TO TOGGLE TIMER) */}
+                <div 
+                  onClick={() => setIsStudying(prev => !prev)}
+                  className={`bg-white border rounded-3xl p-5 shadow-sm flex flex-col justify-between cursor-pointer transition-all duration-300 hover:shadow-md select-none group relative overflow-hidden ${
+                    isStudying 
+                      ? "border-emerald-500 ring-2 ring-emerald-100 bg-emerald-50/20" 
+                      : "border-slate-200 hover:border-slate-350"
+                  }`}
+                >
+                  <div className="flex justify-between items-center pb-2">
+                    <div className="flex items-center gap-2.5">
+                      <div className={`p-2 rounded-xl border ${isStudying ? "bg-emerald-100 border-emerald-200 text-emerald-600" : "bg-slate-100 border-slate-200 text-slate-600"}`}>
+                        <PlayCircle className={`w-5 h-5 ${isStudying ? "animate-spin" : ""}`} style={{ animationDuration: isStudying ? '4s' : '0s' }} />
+                      </div>
+                      <div>
+                        <h3 className="text-sm font-bold text-slate-800 font-display">
+                          {isArabic ? "جلسة المذاكرة الحالية" : "Current Study Session"}
+                        </h3>
+                        <p className="text-[10px] text-slate-400 mt-0.5">
+                          {isStudying 
+                            ? (isArabic ? "اضغط لإيقاف مؤقت الجلسة" : "Click anywhere to pause")
+                            : (isArabic ? "اضغط لبدء المؤقت مباشرة" : "Click anywhere to start")
+                          }
+                        </p>
+                      </div>
+                    </div>
+
+                    {isStudying && (
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-100 animate-pulse">
+                        <span className="w-1 h-1 rounded-full bg-emerald-500" />
+                        {isArabic ? "قيد الاحتساب" : "Recording"}
+                      </span>
+                    )}
+                  </div>
+
+                  {/* Elapsed timer duration */}
+                  <div className="text-3xl sm:text-4.5xl font-black font-mono text-center text-slate-800 py-3">
+                    {formatDuration(studyElapsedSeconds)}
+                  </div>
+
+                  {/* Save only button */}
+                  <div className="flex justify-center pt-2">
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation(); // VERY IMPORTANT: stop event bubbling so we don't toggle study back on/off!
+                        handleSaveStudySession();
+                      }}
+                      disabled={studyElapsedSeconds === 0}
+                      className={`w-full py-2.5 rounded-xl font-bold text-xs transition-all flex items-center justify-center gap-2 cursor-pointer ${
+                        studyElapsedSeconds === 0
+                          ? "bg-slate-100 text-slate-400 cursor-not-allowed border border-slate-200"
+                          : "bg-indigo-600 hover:bg-indigo-700 text-white shadow-md shadow-indigo-100 hover:shadow-indigo-200"
+                      }`}
+                    >
+                      <Save className="w-4 h-4" />
+                      <span>{isArabic ? "حفظ فقط" : "Save Only"}</span>
+                    </button>
+                  </div>
+                </div>
+
+              </div>
+            )}
+
+            {/* ERRORS & OBSTACLES REGISTER CARD */}
+            {student && (
+              <div className="bg-white border border-slate-200 rounded-3xl p-6 sm:p-8 shadow-sm space-y-6" id="errors-obstacles-card">
+                <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 border-b border-slate-100 pb-5">
+                  <div className="flex items-center gap-3">
+                    <div className="bg-rose-50 p-2.5 rounded-2xl border border-rose-100 text-rose-600">
+                      <FileText className="w-6 h-6" />
+                    </div>
+                    <div>
+                      <h3 className="text-lg font-extrabold text-slate-800 font-display">
+                        {isArabic ? "تسجيل الأخطاء والمعيقات" : "Errors & Obstacles Log"}
+                      </h3>
+                      <p className="text-xs text-slate-400 mt-0.5">
+                        {isArabic 
+                          ? "سجّل أخطاءك، الصعوبات التي واجهتك، وكيفية معالجتها لترسيخ التعلم." 
+                          : "Record your errors, difficulties faced, and how you resolved them to solidify learning."}
+                      </p>
+                    </div>
+                  </div>
+
+                  {!showErrorObstacleForm && (
+                    <button
+                      onClick={() => {
+                        setEditingErrorObstacleId(null);
+                        setFormErrorCommitted("");
+                        setFormDifficultyFaced("");
+                        setFormHowResolved("");
+                        setShowErrorObstacleForm(true);
+                      }}
+                      className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white font-extrabold px-5 py-2.5 rounded-2xl text-xs transition-all shadow-md shadow-indigo-100 cursor-pointer shrink-0"
+                    >
+                      <Plus className="w-4 h-4" />
+                      <span>{isArabic ? "تسجيل سجل جديد" : "Record New Entry"}</span>
+                    </button>
+                  )}
+                </div>
+
+                {/* Dynamic Inline Form */}
+                {showErrorObstacleForm && (
+                  <form onSubmit={handleSaveErrorObstacle} className="bg-slate-50/50 border border-slate-100 p-5 sm:p-6 rounded-2xl space-y-4 animate-fade-in" id="error-obstacle-form">
+                    <h4 className="text-xs font-black text-indigo-700 uppercase tracking-wider mb-2">
+                      {editingErrorObstacleId 
+                        ? (isArabic ? "تعديل سجل الأخطاء والمعيقات" : "Edit Log Entry") 
+                        : (isArabic ? "إضافة سجل أخطاء ومعيقات جديد" : "New Log Entry")}
+                    </h4>
+
+                    <div className="space-y-4">
+                      {/* 1. Errors committed */}
+                      <div>
+                        <label className="block text-xs font-bold text-slate-700 mb-1.5">
+                          {isArabic ? "الأخطاء التي ارتكبتها:" : "Errors committed:"}
+                        </label>
+                        <textarea
+                          rows={2}
+                          required
+                          value={formErrorCommitted}
+                          onChange={(e) => setFormErrorCommitted(e.target.value)}
+                          placeholder={isArabic ? "مثال: كتابة 'He go' بدلاً من 'He goes' أو خلط الحاضر بالماضي..." : "Example: Writing 'He go' instead of 'He goes'..."}
+                          className="w-full bg-white border border-slate-200 rounded-xl p-3 text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 text-xs leading-relaxed"
+                        />
+                      </div>
+
+                      {/* 2. Difficulties faced */}
+                      <div>
+                        <label className="block text-xs font-bold text-slate-700 mb-1.5">
+                          {isArabic ? "الصعوبات التي واجهتني:" : "Difficulties faced:"}
+                        </label>
+                        <textarea
+                          rows={2}
+                          required
+                          value={formDifficultyFaced}
+                          onChange={(e) => setFormDifficultyFaced(e.target.value)}
+                          placeholder={isArabic ? "مثال: تذكر قاعدة الفاعل المفرد والجمع أثناء المحادثة السريعة..." : "Example: Remembering the singular subject-verb rule during rapid speech..."}
+                          className="w-full bg-white border border-slate-200 rounded-xl p-3 text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 text-xs leading-relaxed"
+                        />
+                      </div>
+
+                      {/* 3. How resolved */}
+                      <div>
+                        <label className="block text-xs font-bold text-slate-700 mb-1.5">
+                          {isArabic ? "كيفية معالجتها وحلها:" : "How resolved / treated:"}
+                        </label>
+                        <textarea
+                          rows={2}
+                          required
+                          value={formHowResolved}
+                          onChange={(e) => setFormHowResolved(e.target.value)}
+                          placeholder={isArabic ? "مثال: القيام بـ 10 تمارين قواعد يومية، وتكرار الجمل بصوت عالٍ..." : "Example: Doing 10 grammar drills daily, repeating sentences out loud..."}
+                          className="w-full bg-white border border-slate-200 rounded-xl p-3 text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 text-xs leading-relaxed"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="flex justify-end gap-2 pt-3">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setShowErrorObstacleForm(false);
+                          setEditingErrorObstacleId(null);
+                        }}
+                        className="bg-white border border-slate-200 text-slate-600 hover:bg-slate-50 font-bold px-4 py-2 rounded-xl text-xs transition-all cursor-pointer"
+                      >
+                        {isArabic ? "إلغاء" : "Cancel"}
+                      </button>
+                      <button
+                        type="submit"
+                        className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold px-4 py-2 rounded-xl text-xs transition-all shadow-sm cursor-pointer"
+                      >
+                        {isArabic ? "حفظ السجل" : "Save Entry"}
+                      </button>
+                    </div>
+                  </form>
+                )}
+
+                {/* Entries List */}
+                <div className="space-y-4">
+                  {(!student.errorObstacles || student.errorObstacles.length === 0) ? (
+                    <div className="text-center py-8 bg-slate-50/50 rounded-2xl border border-dashed border-slate-200">
+                      <p className="text-xs text-slate-400">
+                        {isArabic 
+                          ? "لم تقم بتسجيل أي أخطاء أو معيقات بعد. ابدأ الآن لمتابعة إنجازاتك ومعالجتها!" 
+                          : "No errors or obstacles logged yet. Start now to track your fixes!"}
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      {student.errorObstacles.map((item) => (
+                        <div key={item.id} className="bg-white border border-slate-100 hover:border-slate-200 rounded-2xl p-5 shadow-xs hover:shadow-sm transition-all flex flex-col justify-between space-y-4 relative">
+                          <div className="space-y-3">
+                            <div className="flex justify-between items-start gap-2">
+                              <span className="text-[9px] font-mono text-slate-400 bg-slate-50 px-2 py-0.5 rounded border border-slate-100">
+                                {new Date(item.createdAt).toLocaleDateString(isArabic ? 'ar-EG' : 'en-US', {
+                                  year: 'numeric',
+                                  month: 'short',
+                                  day: 'numeric'
+                                })}
+                              </span>
+                              
+                              <div className="flex items-center gap-1">
+                                <button
+                                  onClick={() => handleStartEditErrorObstacle(item)}
+                                  className="p-1.5 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-all"
+                                  title={isArabic ? "تعديل" : "Edit"}
+                                >
+                                  <Edit className="w-3.5 h-3.5" />
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => handleDeleteErrorObstacle(item.id)}
+                                  className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-all"
+                                  title={isArabic ? "حذف" : "Delete"}
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </button>
+                              </div>
+                            </div>
+
+                            {/* Error committed */}
+                            <div className="space-y-1">
+                              <span className="text-[10px] font-extrabold text-rose-500 bg-rose-50/50 px-2 py-0.5 rounded-md inline-block">
+                                {isArabic ? "الخطأ المرتكب" : "Error Committed"}
+                              </span>
+                              <p className="text-xs text-slate-700 font-medium leading-relaxed">
+                                {item.errorCommitted}
+                              </p>
+                            </div>
+
+                            {/* Difficulty faced */}
+                            <div className="space-y-1">
+                              <span className="text-[10px] font-extrabold text-amber-600 bg-amber-50/50 px-2 py-0.5 rounded-md inline-block">
+                                {isArabic ? "الصعوبة والمشكلة" : "Difficulty / Obstacle"}
+                              </span>
+                              <p className="text-xs text-slate-600 leading-relaxed">
+                                {item.difficultyFaced}
+                              </p>
+                            </div>
+
+                            {/* How resolved */}
+                            <div className="space-y-1 border-t border-slate-50 pt-2">
+                              <span className="text-[10px] font-extrabold text-emerald-600 bg-emerald-50/50 px-2 py-0.5 rounded-md inline-block">
+                                {isArabic ? "كيف تم الحل والمعالجة" : "Solution / Treated"}
+                              </span>
+                              <p className="text-xs text-slate-700 font-semibold leading-relaxed">
+                                {item.howResolved}
+                              </p>
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
               </div>
             )}
@@ -483,16 +937,16 @@ export default function App() {
                 </h3>
                 <p className="text-xs text-slate-400 mt-0.5">
                   {isArabic 
-                    ? "تواصل مباشرة مع أساتذتك واحضر الحصص التعليمية المباشرة." 
-                    : "Connect directly with your instructors and attend real-time classes."}
+                    ? "احضر الحصص التعليمية المباشرة وتفاعل مع زملائك." 
+                    : "Attend real-time classes and interact with peers."}
                 </p>
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 gap-4">
                 {/* Live Classes Card */}
                 <button
                   onClick={() => setCurrentTab("live")}
-                  className="flex items-start gap-4 p-5 bg-white border border-slate-200 rounded-3xl hover:border-indigo-400 hover:shadow-md transition-all text-left rtl:text-right cursor-pointer"
+                  className="flex items-start gap-4 p-5 bg-white border border-slate-200 rounded-3xl hover:border-indigo-400 hover:shadow-md transition-all text-left rtl:text-right cursor-pointer w-full"
                 >
                   <div className="p-3 bg-amber-50 rounded-2xl text-amber-600">
                     <Calendar className="w-6 h-6" />
@@ -505,32 +959,6 @@ export default function App() {
                       {isArabic
                         ? "احضر الحصص الأسبوعية المباشرة وتفاعل مع الأستاذ وزملائك."
                         : "Join our interactive live streaming sessions with native-like professors."}
-                    </p>
-                  </div>
-                </button>
-
-                {/* Contact Teacher Card */}
-                <button
-                  onClick={() => {
-                    if (student) {
-                      setCurrentTab("chat");
-                    } else {
-                      setShowAuthModal(true);
-                    }
-                  }}
-                  className="flex items-start gap-4 p-5 bg-white border border-slate-200 rounded-3xl hover:border-indigo-400 hover:shadow-md transition-all text-left rtl:text-right cursor-pointer"
-                >
-                  <div className="p-3 bg-indigo-50 rounded-2xl text-indigo-600">
-                    <MessageSquare className="w-6 h-6" />
-                  </div>
-                  <div className="space-y-1">
-                    <h4 className="font-extrabold text-sm text-slate-800">
-                      {isArabic ? "تواصل مباشر مع الأستاذ" : "Direct Contact with Instructor"}
-                    </h4>
-                    <p className="text-xs text-slate-400 leading-relaxed">
-                      {isArabic
-                        ? "اطرح أسئلتك على الأستاذ وتلقى التوجيه والدعم الفردي الفوري."
-                        : "Ask questions, submit your essays, and receive direct personalized feedback."}
                     </p>
                   </div>
                 </button>
@@ -631,22 +1059,6 @@ export default function App() {
           </motion.div>
         )}
 
-        {/* TAB 5: CONTACT SMART AI TEACHER */}
-        {currentTab === "chat" && (
-          <motion.div
-            initial={{ opacity: 0, x: isArabic ? -35 : 35 }}
-            animate={{ opacity: 1, x: 0 }}
-            transition={{ duration: 0.35, ease: "easeOut" }}
-          >
-            <ContactTeacherSection
-              student={student}
-              teacher={currentTeacher}
-              isArabic={isArabic}
-              onOpenAuth={() => setShowAuthModal(true)}
-            />
-          </motion.div>
-        )}
-
         {/* TAB 6: STUDENT PROFILE */}
         {currentTab === "profile" && (
           <motion.div
@@ -661,6 +1073,11 @@ export default function App() {
               vocabulary={vocabulary}
               isArabic={isArabic}
               onOpenAuth={() => setShowAuthModal(true)}
+              isStudying={isStudying}
+              setIsStudying={setIsStudying}
+              studyElapsedSeconds={studyElapsedSeconds}
+              setStudyElapsedSeconds={setStudyElapsedSeconds}
+              formatDuration={formatDuration}
             />
           </motion.div>
         )}
@@ -684,21 +1101,6 @@ export default function App() {
           </motion.div>
         )}
 
-        {/* TAB 8: DAILY TASKS */}
-        {currentTab === "tasks_daily" && (
-          <motion.div
-            initial={{ opacity: 0, x: isArabic ? -35 : 35 }}
-            animate={{ opacity: 1, x: 0 }}
-            transition={{ duration: 0.35, ease: "easeOut" }}
-          >
-            <DailyTasksSection
-              student={student}
-              isArabic={isArabic}
-              onOpenAuth={() => setShowAuthModal(true)}
-            />
-          </motion.div>
-        )}
-
         {/* TAB 9: WEEKLY TASKS */}
         {currentTab === "tasks_weekly" && (
           <motion.div
@@ -710,6 +1112,67 @@ export default function App() {
               student={student}
               isArabic={isArabic}
               onOpenAuth={() => setShowAuthModal(true)}
+              onUpdateStudent={handleUpdateStudent}
+            />
+          </motion.div>
+        )}
+
+        {/* TAB: RESOURCES */}
+        {currentTab === "resources" && (
+          <motion.div
+            initial={{ opacity: 0, x: isArabic ? -35 : 35 }}
+            animate={{ opacity: 1, x: 0 }}
+            transition={{ duration: 0.35, ease: "easeOut" }}
+          >
+            <ResourcesSection
+              resources={resourcesAndTips}
+              isArabic={isArabic}
+              studentLevel={student?.level}
+            />
+          </motion.div>
+        )}
+
+        {/* TAB: TIPS */}
+        {currentTab === "tips" && (
+          <motion.div
+            initial={{ opacity: 0, x: isArabic ? -35 : 35 }}
+            animate={{ opacity: 1, x: 0 }}
+            transition={{ duration: 0.35, ease: "easeOut" }}
+          >
+            <TipsSection
+              tips={resourcesAndTips}
+              isArabic={isArabic}
+              studentLevel={student?.level}
+            />
+          </motion.div>
+        )}
+
+        {/* TAB: TRAINING */}
+        {currentTab === "training" && (
+          <motion.div
+            initial={{ opacity: 0, x: isArabic ? -35 : 35 }}
+            animate={{ opacity: 1, x: 0 }}
+            transition={{ duration: 0.35, ease: "easeOut" }}
+          >
+            <TrainingSection
+              student={student}
+              isArabic={isArabic}
+              onUpdateStudent={handleUpdateStudent}
+              onOpenAuth={() => setShowAuthModal(true)}
+            />
+          </motion.div>
+        )}
+
+        {/* TAB: RECORDED LESSONS */}
+        {currentTab === "recorded_lessons" && (
+          <motion.div
+            initial={{ opacity: 0, x: isArabic ? -35 : 35 }}
+            animate={{ opacity: 1, x: 0 }}
+            transition={{ duration: 0.35, ease: "easeOut" }}
+          >
+            <RecordedLessonsSection
+              student={student}
+              isArabic={isArabic}
             />
           </motion.div>
         )}
@@ -733,7 +1196,7 @@ export default function App() {
       <footer className="bg-slate-900 text-slate-400 border-t border-slate-800 py-8 text-center text-xs shrink-0 select-none pb-28 md:pb-8" id="main-footer">
         <div className="max-w-7xl mx-auto px-4 space-y-1.5">
           <p className="font-semibold text-slate-200">
-            {isArabic ? "منصة English Pathway لتعليم اللغة الإنجليزية" : "English Pathway Learning Platform"}
+            {isArabic ? "منصة Pathway Languages لتعليم اللغات" : "Pathway Languages Learning Platform"}
           </p>
           <p className="text-[11px] text-slate-500 font-mono leading-normal">
             &copy; 2026 - {isArabic ? "جميع الحقوق محفوظة. تأسست المنصة في يونيو 2026 م." : "All Rights Reserved. Created in June 2026."}

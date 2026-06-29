@@ -1,9 +1,9 @@
 import React, { useState, useEffect } from "react";
 import { Chrome, Sparkles, CheckCircle2, ChevronRight, BookOpen, User, Languages, AlertCircle, HelpCircle } from "lucide-react";
 import { auth, GoogleAuthProvider, signInWithPopup, db, doc, setDoc } from "../lib/firebase";
-import { getStudentProfile, saveStudentProfile, getTeachers } from "../lib/dbService";
+import { getStudentProfile, saveStudentProfile, getTeachers, subscribeToTeachers } from "../lib/dbService";
 import { Student, Teacher } from "../types";
-import PathwayLogo from "./PathwayLogo";
+
 
 interface LoginPageProps {
   isArabic: boolean;
@@ -24,9 +24,8 @@ export default function LoginPage({
   const [loading, setLoading] = useState(false);
   
   // Onboarding wizard states
-  const [step, setStep] = useState<"login" | "language" | "level" | "teacher" | "complete">("login");
-  const [selectedLanguage, setSelectedLanguage] = useState<string | null>(null);
-  const [selectedLevel, setSelectedLevel] = useState<"A1" | "A2" | "B1" | "B2" | "C1" | null>(null);
+  const [step, setStep] = useState<"login" | "level" | "teacher" | "complete">("login");
+  const [selectedLevel, setSelectedLevel] = useState<"A1" | "A2" | "B1" | "B2" | "C1" | "C2" | null>(null);
   const [teachersList, setTeachersList] = useState<Teacher[]>([]);
   const [selectedTeacher, setSelectedTeacher] = useState<Teacher | null>(null);
 
@@ -37,19 +36,18 @@ export default function LoginPage({
 
   // Load teachers on mount to display in step 3
   useEffect(() => {
-    getTeachers().then((list) => {
+    const unsubscribe = subscribeToTeachers((list) => {
       // Filter out disabled teachers for student registration
       const activeTeachers = list.filter(t => !t.isDisabled);
       setTeachersList(activeTeachers);
     });
+    return unsubscribe;
   }, []);
 
   // Determine starting step based on student object
   useEffect(() => {
     if (student) {
-      if (!student.selectedLanguage) {
-        setStep("language");
-      } else if (!student.selectedLevelCode) {
+      if (!student.selectedLevelCode) {
         setStep("level");
       } else if (!student.selectedTeacherId) {
         setStep("teacher");
@@ -95,29 +93,8 @@ export default function LoginPage({
     onAuthSuccess(sandboxUid, sandboxName.trim(), cleanEmail);
   };
 
-  // Step 1: Language selection helper
-  const languages = [
-    { id: "English", nameEn: "English", nameAr: "الإنجليزية", icon: "🇬🇧", available: true },
-    { id: "Spanish", nameEn: "Spanish", nameAr: "الإسبانية", icon: "🇪🇸", available: false },
-    { id: "Italian", nameEn: "Italian", nameAr: "الإيطالية", icon: "🇮🇹", available: false },
-    { id: "French", nameEn: "French", nameAr: "الفرنسية", icon: "🇫🇷", available: false },
-  ];
-
-  const handleSelectLanguage = (lang: typeof languages[0]) => {
-    if (!lang.available) {
-      alert(isArabic ? "ستتوفر قريباً" : "Will be available soon!");
-      return;
-    }
-    setSelectedLanguage(lang.id);
-    if (student) {
-      const updated = { ...student, selectedLanguage: lang.id };
-      onUpdateStudent(updated);
-    }
-    setStep("level");
-  };
-
   // Step 2: Level selection helper
-  const levels: ("A1" | "A2" | "B1" | "B2" | "C1")[] = ["A1", "A2", "B1", "B2", "C1"];
+  const levels: ("A1" | "A2" | "B1" | "B2" | "C1" | "C2")[] = ["A1", "A2", "B1", "B2", "C1", "C2"];
   
   const levelNamesEn: Record<string, string> = {
     A1: "Beginner / Breakthrough",
@@ -125,6 +102,7 @@ export default function LoginPage({
     B1: "Intermediate / Threshold",
     B2: "Upper Intermediate / Vantage",
     C1: "Advanced / Effective Operational Proficiency",
+    C2: "Mastery / Highly Proficient",
   };
 
   const levelNamesAr: Record<string, string> = {
@@ -133,12 +111,19 @@ export default function LoginPage({
     B1: "متوسط / متوسط أساسي",
     B2: "فوق المتوسط",
     C1: "متقدم / احترافي",
+    C2: "مستوى الإتقان التام",
   };
 
-  const handleSelectLevel = (lvl: "A1" | "A2" | "B1" | "B2" | "C1") => {
+  const handleSelectLevel = async (lvl: "A1" | "A2" | "B1" | "B2" | "C1" | "C2") => {
     setSelectedLevel(lvl);
     if (student) {
-      const updated = { ...student, selectedLevelCode: lvl, level: lvl };
+      const updated: Student = {
+        ...student,
+        level: lvl,
+        selectedLevelCode: lvl,
+        selectedLanguage: "English",
+      };
+      await saveStudentProfile(updated, student.selectedTeacherId || "teacher-sarah");
       onUpdateStudent(updated);
     }
     setStep("teacher");
@@ -154,7 +139,7 @@ export default function LoginPage({
         selectedTeacherName: teacher.name,
         level: selectedLevel || student.level || "A1",
         selectedLevelCode: selectedLevel || student.selectedLevelCode || "A1",
-        selectedLanguage: selectedLanguage || student.selectedLanguage || "English",
+        selectedLanguage: "English",
       };
       
       // Save to Firebase
@@ -171,18 +156,11 @@ export default function LoginPage({
         {/* Subtle decorative background gradient */}
         <div className="absolute top-0 left-0 w-full h-2 bg-gradient-to-r from-indigo-500 via-purple-500 to-indigo-600" />
         
-        {/* LOGO */}
+        {/* LOGO REMOVED */}
         <div className="text-center flex flex-col items-center">
-          <button 
-            onClick={onLogoClick} 
-            className="group focus:outline-none focus:ring-0 transform active:scale-95 transition-all cursor-pointer"
-            title={isArabic ? "لوحة التحكم" : "Dashboard"}
-          >
-            <PathwayLogo size="lg" />
-          </button>
           
           <h2 className="mt-4 text-3xl font-extrabold text-slate-800 font-display tracking-tight">
-            English <span className="text-indigo-600">Pathway</span>
+            Pathway <span className="text-indigo-600">Languages</span>
           </h2>
           
           <p className="mt-2 text-xs text-slate-500 max-w-xs mx-auto leading-relaxed">
@@ -272,58 +250,13 @@ export default function LoginPage({
             </div>
           )}
 
-          {/* STEP 2: LANGUAGE SELECTION */}
-          {step === "language" && (
-            <div className="space-y-6 animate-fade-in" id="step-language-box">
-              <div className="text-center">
-                <span className="text-[10px] bg-indigo-50 text-indigo-700 font-bold px-3 py-1 rounded-full uppercase tracking-wider flex items-center gap-1.5 w-max mx-auto">
-                  <Languages className="w-3.5 h-3.5" />
-                  {isArabic ? "الخطوة 1 من 4" : "Step 1 of 4"}
-                </span>
-                <h3 className="text-lg font-bold text-slate-800 mt-2">
-                  {isArabic ? "اختر لغة التعلم المفضلة" : "Select Your Learning Language"}
-                </h3>
-                <p className="text-xs text-slate-400 mt-1">
-                  {isArabic ? "يرجى تحديد اللغة التي ترغب في تعلمها:" : "Please choose which language you want to study:"}
-                </p>
-              </div>
-
-              <div className="grid grid-cols-2 gap-4">
-                {languages.map((lang) => (
-                  <button
-                    key={lang.id}
-                    onClick={() => handleSelectLanguage(lang)}
-                    className={`p-4 rounded-2xl border text-center transition-all flex flex-col items-center justify-center gap-2 cursor-pointer relative overflow-hidden group ${
-                      lang.available 
-                        ? "border-slate-200 bg-white hover:border-indigo-400 hover:shadow-lg hover:shadow-indigo-50/50" 
-                        : "border-slate-100 bg-slate-50/50 opacity-60 hover:border-slate-200"
-                    }`}
-                  >
-                    <span className="text-4xl filter drop-shadow-sm group-hover:scale-110 transition-transform duration-300">
-                      {lang.icon}
-                    </span>
-                    <span className="font-extrabold text-slate-800 text-sm">
-                      {isArabic ? lang.nameAr : lang.nameEn}
-                    </span>
-                    
-                    {!lang.available && (
-                      <span className="absolute bottom-1.5 inset-x-0 mx-auto text-[8px] font-bold text-amber-600 bg-amber-50 px-1.5 py-0.5 rounded-full w-max">
-                        {isArabic ? "قريباً" : "Soon"}
-                      </span>
-                    )}
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* STEP 3: LEVEL SELECTION */}
+          {/* STEP 2: LEVEL SELECTION */}
           {step === "level" && (
             <div className="space-y-6 animate-fade-in" id="step-level-box">
               <div className="text-center">
                 <span className="text-[10px] bg-indigo-50 text-indigo-700 font-bold px-3 py-1 rounded-full uppercase tracking-wider flex items-center gap-1.5 w-max mx-auto">
                   <BookOpen className="w-3.5 h-3.5" />
-                  {isArabic ? "الخطوة 2 من 4" : "Step 2 of 4"}
+                  {isArabic ? "الخطوة 1 من 3" : "Step 1 of 3"}
                 </span>
                 <h3 className="text-lg font-bold text-slate-800 mt-2">
                   {isArabic ? "حدد مستواك الدراسي الحالي" : "Select Your Current English Level"}
@@ -368,7 +301,7 @@ export default function LoginPage({
               <div className="text-center">
                 <span className="text-[10px] bg-indigo-50 text-indigo-700 font-bold px-3 py-1 rounded-full uppercase tracking-wider flex items-center gap-1.5 w-max mx-auto">
                   <User className="w-3.5 h-3.5" />
-                  {isArabic ? "الخطوة 3 من 4" : "Step 3 of 4"}
+                  {isArabic ? "الخطوة 2 من 3" : "Step 2 of 3"}
                 </span>
                 <h3 className="text-lg font-bold text-slate-800 mt-2">
                   {isArabic ? "اختر الأستاذ المفضل لديك" : "Choose Your Preferred Tutor"}
@@ -387,20 +320,32 @@ export default function LoginPage({
                     onClick={() => handleSelectTeacher(teacherItem)}
                     className="w-full text-left rtl:text-right p-4 rounded-2xl border border-slate-200 bg-white hover:border-indigo-500 hover:shadow-md transition-all flex items-center gap-3.5 group cursor-pointer"
                   >
-                    <div className="w-11 h-11 rounded-2xl bg-gradient-to-tr from-indigo-100 to-indigo-50 text-indigo-700 font-extrabold text-base flex items-center justify-center shrink-0 border border-indigo-100 shadow-sm group-hover:from-indigo-600 group-hover:to-indigo-500 group-hover:text-white transition-all">
-                      {teacherItem.name.charAt(10).toUpperCase() || teacherItem.name.charAt(0).toUpperCase()}
-                    </div>
+                    {teacherItem.photoUrl ? (
+                      <img
+                        src={teacherItem.photoUrl}
+                        alt={teacherItem.name}
+                        className="w-12 h-12 rounded-2xl object-cover shrink-0 border border-slate-100 shadow-sm"
+                        referrerPolicy="no-referrer"
+                      />
+                    ) : (
+                      <div className="w-12 h-12 rounded-2xl bg-gradient-to-tr from-indigo-100 to-indigo-50 text-indigo-700 font-extrabold text-base flex items-center justify-center shrink-0 border border-indigo-100 shadow-sm group-hover:from-indigo-600 group-hover:to-indigo-500 group-hover:text-white transition-all">
+                        {teacherItem.name.charAt(0).toUpperCase()}
+                      </div>
+                    )}
                     
-                    <div className="flex-1">
-                      <span className="block font-extrabold text-slate-800 text-xs group-hover:text-indigo-600 transition-all">
+                    <div className="flex-1 min-w-0">
+                      <span className="block font-extrabold text-slate-800 text-xs group-hover:text-indigo-600 transition-all truncate">
                         {teacherItem.name}
                       </span>
-                      <span className="text-[10px] text-slate-400 block mt-0.5">
-                        {isArabic ? "نشط حالياً • متاح للرد الفوري" : "Currently active • Instant tutoring reply"}
+                      <span className="text-[10px] text-indigo-600 font-medium block mt-0.5 truncate">
+                        {isArabic ? (teacherItem.specialtyAr || "أستاذ متخصص") : (teacherItem.specialty || "Specialized Tutor")}
+                      </span>
+                      <span className="text-[9px] text-slate-400 block mt-0.5">
+                        {isArabic ? "نشط حالياً • متاح للرد الفوري" : "Currently active • Ready to assist"}
                       </span>
                     </div>
 
-                    <div className="text-[10px] font-bold text-indigo-600 bg-indigo-50 px-2.5 py-1 rounded-xl group-hover:bg-indigo-600 group-hover:text-white transition-all">
+                    <div className="text-[10px] font-bold text-indigo-600 bg-indigo-50 px-2.5 py-1 rounded-xl group-hover:bg-indigo-600 group-hover:text-white transition-all shrink-0">
                       {isArabic ? "اختيار" : "Select"}
                     </div>
                   </button>
@@ -441,7 +386,7 @@ export default function LoginPage({
                 <div className="flex justify-between">
                   <span className="text-slate-400">{isArabic ? "المعلم المرافق:" : "Your Tutor:"}</span>
                   <span className="font-bold text-slate-800 truncate max-w-[150px]">
-                    {student?.selectedTeacherName || selectedTeacher?.name || "Thomas"}
+                    {student?.selectedTeacherName || selectedTeacher?.name || "Sarah"}
                   </span>
                 </div>
               </div>

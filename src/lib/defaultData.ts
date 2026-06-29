@@ -1,98 +1,8 @@
 import { Lesson, Vocabulary, LiveSession } from "../types";
+import { grammarLessons } from "./grammarLessonsData";
 
 export const defaultLessons: Lesson[] = [
-  {
-    id: "grammar-1",
-    title: "Present Simple vs. Present Continuous",
-    titleAr: "المضارع البسيط مقابل المضارع المستمر",
-    category: "grammar",
-    level: "A1",
-    content: `### 1. Present Simple
-We use the **Present Simple** to talk about:
-* **Habits and routines:** I drink coffee every morning.
-* **General truths or facts:** The sun rises in the east.
-* **Permanent states:** She lives in London.
-
-**Form:** 
-* Subject + Verb (add '-s' or '-es' for third-person: he/she/it).
-* *Example:* He speaks English.
-
----
-
-### 2. Present Continuous
-We use the **Present Continuous** to talk about:
-* **Actions happening right now:** I am reading this lesson.
-* **Temporary situations:** They are staying in a hotel this week.
-
-**Form:** 
-* Subject + am/is/are + Verb-ing.
-* *Example:* She is studying grammar.
-
----
-
-### Key Summary
-* **Simple:** Habits, permanent things. (I work here)
-* **Continuous:** Now, temporary things. (I am working right now)`,
-    contentAr: `### 1. المضارع البسيط (Present Simple)
-نستخدم **المضارع البسيط** للتحدث عن:
-* **العادات والروتين اليومي:** أشرب القهوة كل صباح. (I drink coffee every morning)
-* **الحقائق العامة:** تشرق الشمس من الشرق. (The sun rises in the east)
-* **الحالات الدائمة:** هي تعيش في لندن. (She lives in London)
-
-**الصيغة:**
-* الفاعل (Subject) + الفعل الأساسي (Verb) (مع إضافة 's' أو 'es' للمفرد الغائب: he/she/it).
-* *مثال:* هو يتحدث الإنجليزية. (He speaks English)
-
----
-
-### 2. المضارع المستمر (Present Continuous)
-نستخدم **المضارع المستمر** للتحدث عن:
-* **أحداث تحدث الآن في هذه اللحظة:** أنا أقرأ هذا الدرس الآن. (I am reading this lesson)
-* **مواقف مؤقتة:** هم يقيمون في فندق هذا الأسبوع. (They are staying in a hotel this week)
-
-**الصيغة:**
-* الفاعل + am/is/are + الفعل مضافاً إليه ing.
-* *مثال:* هي تدرس القواعد حالياً. (She is studying grammar)
-
----
-
-### ملخص رئيسي
-* **البسيط:** للعادات والأمور الدائمة.
-* **المستمر:** للأحداث الجارية الآن والأمور المؤقتة.`,
-    quiz: [
-      {
-        question: "Choose the correct sentence for a daily routine:",
-        options: [
-          "I am drinking milk every day.",
-          "I drinks milk every day.",
-          "I drink milk every day.",
-          "I was drinking milk every day."
-        ],
-        correctAnswer: 2
-      },
-      {
-        question: "Look! She ____ a beautiful red dress today.",
-        options: [
-          "wears",
-          "is wearing",
-          "wear",
-          "wearing"
-        ],
-        correctAnswer: 1
-      },
-      {
-        question: "Water ____ at 100 degrees Celsius.",
-        options: [
-          "boils",
-          "is boiling",
-          "boil",
-          "boiled"
-        ],
-        correctAnswer: 0
-      }
-    ],
-    createdAt: "2026-06-24T00:00:00Z"
-  },
+  ...grammarLessons,
   {
     id: "vocabulary-1",
     title: "Essential Adjectives for Success",
@@ -255,7 +165,7 @@ export const defaultLiveSessions: LiveSession[] = [
     time: "18:00 UTC",
     link: "https://meet.google.com/abc-defg-hij",
     status: "upcoming",
-    teacherName: "Professor Thomas",
+    teacherName: "Professor Sarah",
     createdAt: "2026-06-24T00:00:00Z"
   },
   {

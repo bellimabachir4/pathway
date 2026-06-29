@@ -60,8 +60,8 @@ export default function AboutUsSection({ isArabic }: AboutUsSectionProps) {
         <div className="relative space-y-6">
           <div className="inline-flex items-center gap-2 bg-white/10 px-3.5 py-1.5 rounded-full border border-white/10">
             <Sparkles className="w-3.5 h-3.5 text-indigo-300 animate-pulse" />
-            <span className="text-[10px] font-bold text-indigo-200 uppercase tracking-widest">
-              {isArabic ? "منصة Pathway Academy التعليمية" : "PATHWAY ACADEMY PLATFORM"}
+             <span className="text-[10px] font-bold text-indigo-200 uppercase tracking-widest">
+              {isArabic ? "منصة Pathway Languages التعليمية" : "PATHWAY LANGUAGES PLATFORM"}
             </span>
           </div>
           
@@ -71,8 +71,8 @@ export default function AboutUsSection({ isArabic }: AboutUsSectionProps) {
           
           <p className="text-slate-300 text-xs sm:text-sm leading-relaxed max-w-3xl font-medium">
             {isArabic 
-              ? "Pathway Academy هي منصة تعليمية رقمية حديثة تهدف إلى مساعدة الطلاب على تعلم اللغات والتحضير للاختبارات الدولية مثل IELTS بطريقة منظمة وسهلة. نوفر دروسًا تفاعلية، تمارين عملية، متابعة للتقدم، مهام يومية وأسبوعية، وحصصًا تفاعلية مع الأساتذة لمساعدة الطلاب على تحقيق أهدافهم التعليمية." 
-              : "Pathway Academy is a modern digital educational platform aiming to help students learn languages and prepare for international exams like IELTS in an organized and easy way. We provide interactive lessons, practical exercises, progress tracking, daily and weekly tasks, and live interactive sessions with instructors to help students reach their learning milestones."}
+              ? "Pathway Languages هي منصة تعليمية رقمية حديثة تهدف إلى مساعدة الطلاب على تعلم اللغات والتحضير للاختبارات الدولية مثل IELTS بطريقة منظمة وسهلة. نوفر دروسًا تفاعلية، تمارين عملية، متابعة للتقدم، مهام يومية وأسبوعية، وحصصًا تفاعلية مع الأساتذة لمساعدة الطلاب على تحقيق أهدافهم التعليمية." 
+              : "Pathway Languages is a modern digital educational platform aiming to help students learn languages and prepare for international exams like IELTS in an organized and easy way. We provide interactive lessons, practical exercises, progress tracking, daily and weekly tasks, and live interactive sessions with instructors to help students reach their learning milestones."}
           </p>
         </div>
       </div>

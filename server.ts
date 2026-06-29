@@ -40,7 +40,7 @@ async function startServer() {
         };
       });
 
-      const systemInstruction = `You are "Professor Thomas", a friendly, warm, and highly professional native English teacher on "English Pathway" platform.
+      const systemInstruction = `You are "Professor Thomas", a friendly, warm, and highly professional native English teacher on "Pathway Languages" platform.
 Your student is named ${studentName || "Student"} and is at the ${studentLevel || "Beginner"} level.
 Your goals:
 1. Reply in a friendly, encouraging, and supportive tone.
@@ -69,6 +69,86 @@ Your goals:
     } catch (error: any) {
       console.error("Gemini Chat API Error:", error);
       res.status(500).json({ error: "Failed to communicate with AI Teacher. " + (error.message || "") });
+    }
+  });
+
+  // API Route: AI Vocabulary Generator
+  app.post("/api/generate-vocab", async (req, res) => {
+    try {
+      const { category, level, existingWordsCount = 0 } = req.body;
+
+      if (!category || !level) {
+        return res.status(400).json({ error: "Category and level are required." });
+      }
+
+      const prompt = `You are an expert curriculum designer and lexicographer specialized in English language learning for CEFR levels A1 and A2.
+Generate a list of exactly 15 high-quality, real English vocabulary words or phrases appropriate for CEFR level ${level} in the category of "${category}".
+Make sure these are real, useful words or expressions that are highly standard and accurate for level ${level}.
+Since the student already has ${existingWordsCount} words in this category, try to generate new, interesting, and complementary words.
+
+For each word/phrase, provide:
+1. word: The English word or phrase (capitalized, e.g., "Good morning", "Apple").
+2. translation: The natural Arabic translation/meaning.
+3. partOfSpeech: The part of speech in English (e.g., "Noun", "Verb", "Adjective", "Expression", "Phrasal Verb", "Idiom", "Preposition", "Conjunction").
+4. pronunciation: Phonetic spelling in IPA format (e.g. /ɡʊd ˈmɔːrnɪŋ/, /ˈæpəl/).
+5. example: A simple, natural English example sentence demonstrating correct usage for a student at level ${level}.
+6. exampleAr: A clear, natural Arabic translation of the example sentence.
+
+Your response MUST be a valid JSON array only, conforming exactly to this structure:
+[
+  {
+    "word": "word string",
+    "translation": "translation string",
+    "partOfSpeech": "partOfSpeech string",
+    "pronunciation": "pronunciation string",
+    "example": "example string",
+    "exampleAr": "exampleAr string"
+  }
+]
+
+CRITICAL: Return ONLY the raw JSON array. Do NOT wrap it in any markdown code blocks, do not write 'json' or any introductory or concluding text. Just return the valid JSON array starting with [ and ending with ].`;
+
+      // Call Gemini API
+      const result = await ai.models.generateContent({
+        model: "gemini-3.5-flash",
+        contents: [{ role: "user", parts: [{ text: prompt }] }],
+        config: {
+          temperature: 0.8,
+          maxOutputTokens: 2048,
+        },
+      });
+
+      let responseText = result.text || "[]";
+      // Clean up potential markdown formatting if returned
+      responseText = responseText.trim();
+      if (responseText.startsWith("```")) {
+        // Strip markdown backticks
+        responseText = responseText.replace(/^```json\s*/i, "").replace(/^```\s*/, "").replace(/\s*```$/, "");
+      }
+      responseText = responseText.trim();
+
+      try {
+        const parsedWords = JSON.parse(responseText);
+        res.json({ success: true, words: parsedWords });
+      } catch (jsonErr) {
+        console.error("Failed to parse Gemini vocabulary JSON. Response was:", responseText, jsonErr);
+        // Fallback: search for JSON bracket inside responseText
+        const startIdx = responseText.indexOf("[");
+        const endIdx = responseText.lastIndexOf("]");
+        if (startIdx !== -1 && endIdx !== -1 && endIdx > startIdx) {
+          try {
+            const cleanText = responseText.substring(startIdx, endIdx + 1);
+            const parsedWords = JSON.parse(cleanText);
+            return res.json({ success: true, words: parsedWords });
+          } catch (secondErr) {
+            console.error("Second attempt to parse JSON failed", secondErr);
+          }
+        }
+        res.status(500).json({ error: "AI generated invalid JSON structure. Please try again." });
+      }
+    } catch (error: any) {
+      console.error("Gemini Vocabulary Generator API Error:", error);
+      res.status(500).json({ error: "Failed to generate vocabulary. " + (error.message || "") });
     }
   });
 

@@ -94,6 +94,62 @@
         "timestamp": { "type": "string" }
       },
       "required": ["id", "senderId", "senderName", "senderRole", "text", "timestamp"]
+    },
+    "TrainingTopic": {
+      "title": "Training Topic",
+      "description": "Topics used in the Question Wheel educational game.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "level": { "type": "string" },
+        "language": { "type": "string" },
+        "order": { "type": "integer" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["id", "name", "level", "language", "order"]
+    },
+    "TrainingQuestion": {
+      "title": "Training Question",
+      "description": "Questions linked to training topics in the Question Wheel.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "topicId": { "type": "string" },
+        "questionText": { "type": "string" },
+        "answerOptions": { "type": "array" },
+        "correctAnswerIndex": { "type": "integer" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["id", "topicId", "questionText", "answerOptions", "correctAnswerIndex"]
+    },
+    "TypingSentence": {
+      "title": "Typing Sentence",
+      "description": "Sentences for the Typing Speed Trainer game.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "sentence": { "type": "string" },
+        "level": { "type": "string" },
+        "language": { "type": "string" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["id", "sentence", "level", "language"]
+    },
+    "RecordedLesson": {
+      "title": "Recorded Lesson",
+      "description": "Recorded academic video sessions uploaded by teachers.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "title": { "type": "string" },
+        "topic": { "type": "string" },
+        "level": { "type": "string", "description": "A1, A2, B1, B2, C1, C2" },
+        "order": { "type": "integer" },
+        "videoUrl": { "type": "string" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["id", "title", "topic", "level", "order", "videoUrl"]
     }
   },
   "firestore": {
@@ -120,6 +176,22 @@
     "/chats/{chatId}/messages/{messageId}": {
       "schema": "ChatMessage",
       "description": "Live student chat messages with AI/teachers."
+    },
+    "/training_topics/{topicId}": {
+      "schema": "TrainingTopic",
+      "description": "Topics for the educational Question Wheel game."
+    },
+    "/training_questions/{questionId}": {
+      "schema": "TrainingQuestion",
+      "description": "Questions matching the Question Wheel topics."
+    },
+    "/typing_sentences/{sentenceId}": {
+      "schema": "TypingSentence",
+      "description": "Sentences for typing practice across levels."
+    },
+    "/recorded_lessons/{lessonId}": {
+      "schema": "RecordedLesson",
+      "description": "Recorded videos managed by teachers and watched by students."
     }
   }
 }

@@ -97,7 +97,7 @@ export default function AuthModal({ isOpen, onClose, isArabic, onSuccess }: Auth
               <LogIn className="w-6 h-6" />
             </div>
             <h4 className="text-base font-semibold text-neutral-900 font-display">
-              {isArabic ? "مرحباً بك في English Pathway" : "Welcome to English Pathway"}
+              {isArabic ? "مرحباً بك في Pathway Languages" : "Welcome to Pathway Languages"}
             </h4>
             <p className="text-xs text-neutral-500 max-w-xs mx-auto">
               {isArabic

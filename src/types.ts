@@ -1,3 +1,11 @@
+export interface ErrorObstacleLog {
+  id: string;
+  errorCommitted: string;
+  difficultyFaced: string;
+  howResolved: string;
+  createdAt: string;
+}
+
 export interface Student {
   uid: string;
   name: string;
@@ -17,6 +25,23 @@ export interface Student {
   registrationDate?: string;
   lastLogin?: string;
   unlockedLevels?: ("A1" | "A2" | "B1" | "B2" | "C1" | "C2")[];
+  studySecondsToday?: number;
+  studySecondsThisWeek?: number;
+  studySecondsTotal?: number;
+  notes?: string;
+  errorObstacles?: ErrorObstacleLog[];
+  completedBooks?: string[];
+  completedWeeklyTasks?: string[];
+}
+
+export interface ResourceOrTip {
+  id: string;
+  type: "resource" | "tip";
+  title: string;
+  url?: string;
+  content: string;
+  level: "A1" | "A2" | "B1" | "B2" | "C1" | "C2" | "All";
+  createdAt: string;
 }
 
 export interface Teacher {
@@ -27,6 +52,8 @@ export interface Teacher {
   loginCode?: string;
   createdAt: string; // ISO string
   isDisabled?: boolean;
+  specialty?: string;
+  specialtyAr?: string;
 }
 
 export interface QuizQuestion {
@@ -59,9 +86,12 @@ export interface Vocabulary {
   definition: string;
   definitionAr: string;
   example: string;
-  category: "daily" | "academic" | "common" | "phrasal";
+  category: string;
   level?: "A1" | "A2" | "B1" | "B2" | "C1" | "C2";
   createdAt: string;
+  partOfSpeech?: string;
+  pronunciation?: string;
+  exampleAr?: string;
 }
 
 export interface LiveSession {
@@ -107,10 +137,64 @@ export interface DailyTask {
 
 export interface WeeklyTask {
   id: string;
-  studentId: string;
+  teacherId?: string;
+  studentId?: string;
   title: string;
   titleAr: string;
-  completed: boolean;
-  weekLabel: string; // e.g., "Week 1: grammar" or "الأسبوع الأول"
+  completed?: boolean;
+  day: "saturday" | "sunday" | "monday" | "tuesday" | "wednesday" | "thursday" | "friday";
+  order: number;
+  level?: "A1" | "A2" | "B1" | "B2" | "C1" | "C2" | "All";
   createdAt: string;
 }
+
+export interface TrainingTopic {
+  id: string;
+  name: string; // Topic name, e.g., "Tenses"
+  level: "A1" | "A2" | "B1" | "B2" | "C1" | "C2";
+  language: "en" | "ar";
+  order: number; // For priority ordering
+  createdAt: string;
+  type?: "speaking" | "writing" | "question";
+}
+
+export interface TrainingQuestion {
+  id: string;
+  topicId: string; // Matches TrainingTopic.id
+  questionText: string;
+  answerOptions: string[]; // List of options (usually 4 choices)
+  correctAnswerIndex: number; // 0-based index of correct option
+  createdAt: string;
+}
+
+export interface TypingSentence {
+  id: string;
+  sentence: string;
+  level: "A1" | "A2" | "B1" | "B2" | "C1" | "C2";
+  language: "en" | "ar";
+  createdAt: string;
+}
+
+export interface RecordedLesson {
+  id: string;
+  title: string;
+  topic: string;
+  level: "A1" | "A2" | "B1" | "B2" | "C1" | "C2";
+  order: number;
+  videoUrl: string;
+  createdAt: string;
+}
+
+export interface LibraryBook {
+  id: string;
+  teacherId?: string;
+  bookNumber: number;
+  coverColor: string; // e.g. 'bg-indigo-600' or similar CSS colors
+  questionText: string;
+  options: string[]; // exactly 4 options
+  correctOptionIndex: number; // 0-3
+  createdAt: string;
+}
+
+
+

@@ -8,7 +8,11 @@ import {
   Calendar, 
   Info, 
   ChevronRight, 
-  ChevronLeft 
+  ChevronLeft,
+  Globe,
+  Lightbulb,
+  Gamepad2,
+  PlayCircle
 } from "lucide-react";
 
 interface SidebarMenuProps {
@@ -33,16 +37,6 @@ export default function SidebarMenu({
 
   const menuItems = [
     {
-      id: "chat",
-      labelEn: "Contact Teacher",
-      labelAr: "التواصل مع الأستاذ",
-      descEn: "Direct chat and guidance with Professor Thomas",
-      descAr: "محادثة مباشرة وتوجيه فوري من الأستاذ توماس",
-      Icon: MessageSquare,
-      color: "text-indigo-600 bg-indigo-50 border-indigo-100",
-      requiresLogin: true
-    },
-    {
       id: "live",
       labelEn: "Interactive Classes",
       labelAr: "الحصص التفاعلية",
@@ -53,14 +47,24 @@ export default function SidebarMenu({
       requiresLogin: false
     },
     {
-      id: "tasks_daily",
-      labelEn: "Daily Tasks",
-      labelAr: "المهام اليومية",
-      descEn: "Track and edit your customized daily goals",
-      descAr: "تابع مهامك اليومية المطلوبة مع إمكانية التعديل والإضافة",
-      Icon: CheckSquare,
-      color: "text-emerald-600 bg-emerald-50 border-emerald-100",
-      requiresLogin: true
+      id: "recorded_lessons",
+      labelEn: "Recorded Sessions",
+      labelAr: "الحصص المسجلة",
+      descEn: "Watch recorded classes uploaded by your teacher",
+      descAr: "شاهد الحصص والدروس المسجلة لمراجعتها وتثبيت الفهم",
+      Icon: PlayCircle,
+      color: "text-rose-650 bg-rose-50 border-rose-100",
+      requiresLogin: false
+    },
+    {
+      id: "training",
+      labelEn: "Academic Training",
+      labelAr: "التدريب الأكاديمي",
+      descEn: "Spin the question wheel and build your typing speed",
+      descAr: "عجلة الأسئلة التفاعلية وتدريب سرعة الكتابة لتطوير مهاراتك",
+      Icon: Gamepad2,
+      color: "text-purple-600 bg-purple-50 border-purple-100",
+      requiresLogin: false
     },
     {
       id: "tasks_weekly",
@@ -73,10 +77,30 @@ export default function SidebarMenu({
       requiresLogin: true
     },
     {
+      id: "resources",
+      labelEn: "Resources and Websites",
+      labelAr: "المصادر والمواقع",
+      descEn: "Explore premium educational websites, dictionaries and material",
+      descAr: "تصفح أفضل المواقع والمصادر التعليمية والقواميس الموصى بها",
+      Icon: Globe,
+      color: "text-indigo-600 bg-indigo-50 border-indigo-100",
+      requiresLogin: false
+    },
+    {
+      id: "tips",
+      labelEn: "Tips and Instructions",
+      labelAr: "النصائح والإرشادات",
+      descEn: "Read strategic tips to boost your language fluency",
+      descAr: "اطلع على توجيهات ونصائح ممتازة لتسريع مهاراتك اللغوية",
+      Icon: Lightbulb,
+      color: "text-yellow-600 bg-yellow-50 border-yellow-100",
+      requiresLogin: false
+    },
+    {
       id: "about",
       labelEn: "About Us",
       labelAr: "حولنا",
-      descEn: "Learn about Pathway Academy vision and contact details",
+      descEn: "Learn about Pathway Languages vision and contact details",
       descAr: "تعرّف على رؤية وأهداف المنصة ووسائل التواصل معنا",
       Icon: Info,
       color: "text-rose-600 bg-rose-50 border-rose-100",
@@ -208,7 +232,7 @@ export default function SidebarMenu({
             {/* Drawer Footer Branding */}
             <div className="p-6 border-t border-slate-100 text-center bg-slate-50/50">
               <span className="block text-[10px] font-black text-slate-400 uppercase tracking-widest">
-                PATHWAY ACADEMY © 2026
+                PATHWAY LANGUAGES © 2026
               </span>
             </div>
           </motion.div>

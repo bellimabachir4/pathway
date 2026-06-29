@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { WeeklyTask, Student } from "../types";
-import { getWeeklyTasks, saveWeeklyTask } from "../lib/dbService";
+import { subscribeToWeeklyTasks } from "../lib/dbService";
 import { 
   CalendarDays, 
   CheckCircle, 
@@ -10,7 +10,9 @@ import {
   Trophy,
   CheckCircle2,
   ChevronRight,
-  TrendingUp
+  TrendingUp,
+  Clock,
+  Calendar
 } from "lucide-react";
 import confetti from "canvas-confetti";
 
@@ -18,12 +20,24 @@ interface WeeklyTasksSectionProps {
   student: Student | null;
   isArabic: boolean;
   onOpenAuth: () => void;
+  onUpdateStudent?: (s: Student) => void;
 }
+
+const DAYS_OF_WEEK = [
+  { key: "saturday", labelEn: "Saturday", labelAr: "السبت" },
+  { key: "sunday", labelEn: "Sunday", labelAr: "الأحد" },
+  { key: "monday", labelEn: "Monday", labelAr: "الإثنين" },
+  { key: "tuesday", labelEn: "Tuesday", labelAr: "الثلاثاء" },
+  { key: "wednesday", labelEn: "Wednesday", labelAr: "الأربعاء" },
+  { key: "thursday", labelEn: "Thursday", labelAr: "الخميس" },
+  { key: "friday", labelEn: "Friday", labelAr: "الجمعة" },
+] as const;
 
 export default function WeeklyTasksSection({
   student,
   isArabic,
   onOpenAuth,
+  onUpdateStudent,
 }: WeeklyTasksSectionProps) {
   const [tasks, setTasks] = useState<WeeklyTask[]>([]);
   const [loading, setLoading] = useState(false);
@@ -31,42 +45,48 @@ export default function WeeklyTasksSection({
 
   useEffect(() => {
     if (!student) return;
-    loadTasks();
+
+    setLoading(true);
+    const teacherId = student.selectedTeacherId || "teacher-sarah";
+    
+    // Real-time synchronization subscription
+    const unsubscribe = subscribeToWeeklyTasks((fetchedTasks) => {
+      setTasks(fetchedTasks);
+      setLoading(false);
+    }, teacherId);
+
+    return () => {
+      unsubscribe();
+    };
   }, [student]);
 
-  const loadTasks = async () => {
-    if (!student) return;
-    setLoading(true);
-    setError(null);
-    try {
-      const data = await getWeeklyTasks(student.uid);
-      setTasks(data);
-    } catch (err) {
-      console.error(err);
-      setError(isArabic ? "فشل تحميل الخطة والمهام الأسبوعية." : "Failed to load weekly plans & tasks.");
-    } finally {
-      setLoading(false);
-    }
-  };
-
   const handleToggleTask = async (task: WeeklyTask) => {
-    if (!student) return;
-    const updated: WeeklyTask = {
-      ...task,
-      completed: !task.completed
+    if (!student || !onUpdateStudent) return;
+    
+    const completedIds = student.completedWeeklyTasks || [];
+    const isCompleted = completedIds.includes(task.id);
+    let updatedCompletedIds: string[];
+
+    if (isCompleted) {
+      updatedCompletedIds = completedIds.filter(id => id !== task.id);
+    } else {
+      updatedCompletedIds = [...completedIds, task.id];
+    }
+
+    const updatedStudent: Student = {
+      ...student,
+      completedWeeklyTasks: updatedCompletedIds
     };
 
-    // Optimistic update
-    setTasks(prev => prev.map(t => t.id === task.id ? updated : t));
-
     try {
-      await saveWeeklyTask(student.uid, updated);
-      
-      if (updated.completed) {
-        const afterUpdate = tasks.map(t => t.id === task.id ? updated : t);
-        const allCompleted = afterUpdate.every(t => t.completed);
+      // Save student progress using the passed callback which updates Firestore & local state
+      onUpdateStudent(updatedStudent);
+
+      // Confetti effect if all tasks are completed
+      if (!isCompleted) {
+        const afterUpdateIds = updatedCompletedIds;
+        const allCompleted = tasks.length > 0 && tasks.every(t => afterUpdateIds.includes(t.id));
         if (allCompleted) {
-          // Epic weekly success confetti!
           confetti({
             particleCount: 150,
             spread: 80,
@@ -76,18 +96,14 @@ export default function WeeklyTasksSection({
       }
     } catch (err) {
       console.error(err);
-      // Revert optimism
-      setTasks(prev => prev.map(t => t.id === task.id ? task : t));
+      setError(isArabic ? "فشل حفظ حالة المهمة." : "Failed to save task completion.");
     }
   };
 
-  const completedCount = tasks.filter(t => t.completed).length;
-  const totalCount = tasks.length;
+  const levelFilteredTasks = tasks.filter(t => t.level === "All" || !t.level || t.level === student?.level);
+  const completedCount = levelFilteredTasks.filter(t => (student?.completedWeeklyTasks || []).includes(t.id)).length;
+  const totalCount = levelFilteredTasks.length;
   const percent = totalCount > 0 ? Math.round((completedCount / totalCount) * 100) : 0;
-
-  // Group tasks by week tag or show as one comprehensive week plan
-  // Since we have week labels "Week 1: grammar" etc, let's group them or display them in chapters
-  const weekLabelDisplay = isArabic ? "خطة الأسبوع الأول: أساسيات القواعد والمفردات" : "Week 1 Plan: Grammar Basics & Vocabulary Bank";
 
   if (!student) {
     return (
@@ -123,17 +139,15 @@ export default function WeeklyTasksSection({
             {isArabic ? "المهام والخطط الأسبوعية" : "Weekly Progress & Schedule"}
           </h2>
           <p className="text-xs text-slate-400 mt-1">
-            {weekLabelDisplay}
+            {isArabic 
+              ? `أهلاً بك! تصفح مهام كل يوم المحددة لك من قبل الأستاذ.` 
+              : `Welcome! Browse daily tasks set by your teacher for your active level.`}
           </p>
         </div>
 
-        <button
-          onClick={loadTasks}
-          className="p-2 text-slate-400 hover:text-indigo-600 hover:bg-slate-50 border border-slate-200/50 bg-white rounded-xl transition-all cursor-pointer"
-          title={isArabic ? "تحديث" : "Refresh"}
-        >
-          <RefreshCw className={`w-4 h-4 ${loading ? "animate-spin" : ""}`} />
-        </button>
+        <div className="p-2 text-indigo-600 bg-indigo-50 border border-indigo-150 rounded-xl">
+          <Calendar className="w-4.5 h-4.5" />
+        </div>
       </div>
 
       {error && (
@@ -145,7 +159,6 @@ export default function WeeklyTasksSection({
 
       {/* Progress Dashboard */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        
         {/* Metric Cards */}
         <div className="md:col-span-2 bg-white p-6 rounded-3xl border border-slate-200 shadow-sm flex flex-col justify-between space-y-6">
           <div className="flex items-start justify-between">
@@ -158,7 +171,7 @@ export default function WeeklyTasksSection({
               </h3>
               <p className="text-xs text-slate-400 leading-relaxed">
                 {isArabic 
-                  ? "أكمل الأهداف الدراسية بنجاح لإتمام الأسبوع بنسبة 100% والانتقال للمستوى التالي." 
+                  ? "أكمل الأهداف الدراسية بنجاح لإتمام الأسبوع بنسبة 100% والانتقال للدرس التالي." 
                   : "Complete these milestone tasks to clear the current week and unlock subsequent chapters."}
               </p>
             </div>
@@ -196,74 +209,92 @@ export default function WeeklyTasksSection({
           
           <div className="space-y-2 text-left rtl:text-right relative">
             <h4 className="text-xs font-black text-indigo-300 uppercase tracking-widest">
-              {isArabic ? "مفتاح الأسبوع" : "WEEKLY GOALS"}
+              {isArabic ? "خطة الأسبوع" : "WEEKLY GOALS"}
             </h4>
             <p className="text-sm font-extrabold leading-snug">
               {isArabic 
-                ? "تتأسس خطة هذا الأسبوع حول ربط المبتدئين بتركيبات الجمل البسيطة وبناء أول 50 مفردة أساسية." 
-                : "This week centers on fundamental sentence modeling and establishing your first core vocabulary."}
+                ? "تتأسس خطة هذا الأسبوع حول ترسيخ مهارات المحادثة، الاستماع، وحفظ الكلمات المحددة لمستواك الحالي." 
+                : "This week centers on conversational fluency, comprehension listening, and core vocabulary assimilation."}
             </p>
           </div>
 
           <div className="pt-4 border-t border-indigo-900 flex items-center gap-2 text-[10px] text-indigo-200 font-bold justify-between">
-            <span>{isArabic ? "المستوى الحالي: مبتدئ" : "Current Rank: Novice"}</span>
+            <span>{isArabic ? `المستوى الحالي: ${student.level}` : `Current Level: ${student.level}`}</span>
             <ChevronRight className="w-3 h-3 rtl:rotate-180" />
           </div>
         </div>
       </div>
 
-      {/* Task Checklist Items */}
-      <div className="bg-white rounded-3xl border border-slate-200 shadow-sm overflow-hidden">
-        <div className="p-5 border-b border-slate-100 bg-slate-50/50 flex justify-between items-center">
-          <h3 className="text-xs font-black text-slate-800 uppercase tracking-wider">
-            {isArabic ? "📋 قائمة الأهداف الأسبوعية" : "📋 WEEK OBJECTIVES LIST"}
-          </h3>
-          <span className="text-[10px] text-slate-450 font-bold">
-            {isArabic ? "اضغط على الدائرة للمناوبة" : "Click node to toggle state"}
-          </span>
-        </div>
-
-        <div className="divide-y divide-slate-100">
-          {loading ? (
-            <div className="flex justify-center items-center py-16">
-              <RefreshCw className="w-6 h-6 text-indigo-500 animate-spin" />
-            </div>
-          ) : tasks.length === 0 ? (
-            <div className="p-12 text-center text-slate-400">
-              <p className="text-xs font-bold italic">{isArabic ? "لا توجد خطة أسبوعية نشطة." : "No active weekly tasks."}</p>
-            </div>
-          ) : (
-            tasks.map((task) => (
-              <button
-                key={task.id}
-                onClick={() => handleToggleTask(task)}
-                className="w-full p-5 text-left rtl:text-right hover:bg-slate-50/50 transition-colors flex items-start gap-4 cursor-pointer focus:outline-none"
-                id={`weekly-task-item-${task.id}`}
-              >
-                {/* Check Circle indicator */}
-                <div className="shrink-0 pt-0.5">
-                  {task.completed ? (
-                    <CheckCircle2 className="w-5.5 h-5.5 text-indigo-600 fill-indigo-50" />
-                  ) : (
-                    <Circle className="w-5.5 h-5.5 text-slate-300 hover:text-indigo-500 transition-colors" />
-                  )}
+      {/* Days of the Week Layout */}
+      <div className="space-y-6">
+        {DAYS_OF_WEEK.map((day) => {
+          const dayTasks = levelFilteredTasks.filter(t => t.day === day.key);
+          
+          return (
+            <div key={day.key} className="bg-white rounded-3xl border border-slate-200 shadow-sm overflow-hidden" id={`day-card-${day.key}`}>
+              {/* Day Header */}
+              <div className="p-4 px-5 border-b border-slate-100 bg-slate-50/60 flex justify-between items-center">
+                <div className="flex items-center gap-2">
+                  <div className="w-2.5 h-2.5 rounded-full bg-indigo-600" />
+                  <h3 className="text-sm font-extrabold text-slate-800">
+                    {isArabic ? day.labelAr : day.labelEn}
+                  </h3>
                 </div>
+                <span className="text-[10px] text-slate-400 font-bold">
+                  {dayTasks.length} {isArabic ? "مهام" : "tasks"}
+                </span>
+              </div>
 
-                {/* Text Context */}
-                <div className="flex-grow space-y-0.5 min-w-0">
-                  <h4 className={`text-xs font-bold leading-relaxed ${
-                    task.completed ? "text-slate-400 line-through font-normal" : "text-slate-700"
-                  }`}>
-                    {isArabic ? task.titleAr : task.title}
-                  </h4>
-                  <p className="text-[10px] text-slate-400 font-semibold">
-                    {isArabic ? task.title : task.titleAr}
-                  </p>
-                </div>
-              </button>
-            ))
-          )}
-        </div>
+              {/* Day Tasks List */}
+              <div className="divide-y divide-slate-100">
+                {loading ? (
+                  <div className="flex justify-center items-center py-6">
+                    <RefreshCw className="w-5 h-5 text-indigo-500 animate-spin" />
+                  </div>
+                ) : dayTasks.length === 0 ? (
+                  <div className="p-6 text-center text-slate-400">
+                    <p className="text-xs italic font-semibold">
+                      {isArabic ? "لا توجد مهام محددة لهذا اليوم." : "No tasks assigned for today."}
+                    </p>
+                  </div>
+                ) : (
+                  dayTasks.map((task) => {
+                    const isCompleted = (student?.completedWeeklyTasks || []).includes(task.id);
+                    return (
+                      <button
+                        key={task.id}
+                        onClick={() => handleToggleTask(task)}
+                        className="w-full p-4.5 px-5 text-left rtl:text-right hover:bg-slate-50/50 transition-colors flex items-start gap-3.5 cursor-pointer focus:outline-none"
+                        id={`weekly-task-item-${task.id}`}
+                      >
+                        {/* Checkbox Node */}
+                        <div className="shrink-0 pt-0.5">
+                          {isCompleted ? (
+                            <CheckCircle2 className="w-5 h-5 text-indigo-600 fill-indigo-50" />
+                          ) : (
+                            <Circle className="w-5 h-5 text-slate-300 hover:text-indigo-500 transition-colors" />
+                          )}
+                        </div>
+
+                        {/* Title and translation */}
+                        <div className="flex-grow space-y-0.5 min-w-0">
+                          <h4 className={`text-xs font-extrabold leading-relaxed ${
+                            isCompleted ? "text-slate-400 line-through font-normal" : "text-slate-700"
+                          }`}>
+                            {isArabic ? task.titleAr : task.title}
+                          </h4>
+                          <p className="text-[9px] text-slate-400 font-bold">
+                            {isArabic ? task.title : task.titleAr}
+                          </p>
+                        </div>
+                      </button>
+                    );
+                  })
+                )}
+              </div>
+            </div>
+          );
+        })}
       </div>
     </div>
   );

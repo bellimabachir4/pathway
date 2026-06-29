@@ -176,7 +176,7 @@ export default function LessonsSection({
           <div className="bg-gradient-to-r from-indigo-900 to-indigo-800 text-white rounded-3xl p-6 sm:p-8 relative overflow-hidden shadow-xl shadow-indigo-100">
             <div className="relative z-10 max-w-2xl text-left rtl:text-right space-y-3">
               <span className="inline-block bg-indigo-500/30 text-indigo-200 text-xs font-bold px-3 py-1 rounded-full uppercase tracking-wider">
-                {isArabic ? "منصة English Pathway التعليمية" : "English Pathway Academy"}
+                {isArabic ? "منصة Pathway Languages التعليمية" : "Pathway Languages"}
               </span>
               <h2 className="text-2xl sm:text-3.5xl font-extrabold font-display leading-tight">
                 {isArabic ? "دروس تفاعلية لجميع المستويات" : "Interactive Lessons Tailored For You"}

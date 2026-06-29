@@ -14,7 +14,7 @@ import {
   orderBy,
   limit 
 } from "./firebase";
-import { Student, Teacher, Lesson, Vocabulary, LiveSession, ChatMessage, Announcement, DailyTask, WeeklyTask } from "../types";
+import { Student, Teacher, Lesson, Vocabulary, LiveSession, ChatMessage, Announcement, DailyTask, WeeklyTask, ResourceOrTip, TrainingTopic, TrainingQuestion, TypingSentence, RecordedLesson, LibraryBook } from "../types";
 import { defaultLessons, defaultVocabulary, defaultLiveSessions } from "./defaultData";
 
 // Local storage keys as backup/cache
@@ -48,38 +48,33 @@ function setLocal<T>(key: string, value: T) {
 
 // ================= RESOLVE TEACHER HELPERS =================
 export async function resolveTeacherId(providedId?: string): Promise<string> {
-  const tid = providedId || "teacher-thomas";
-  if (tid !== "teacher-thomas") {
+  const tid = providedId || "teacher-sarah";
+  if (tid !== "teacher-sarah") {
     return tid;
   }
   const teachers = await getTeachers();
   if (teachers.length > 0) {
     return teachers[0].uid;
   }
-  return "teacher-thomas";
+  return "teacher-sarah";
 }
 
 // ================= STUDENTS SERVICE =================
 export async function saveStudentProfile(student: Student, teacherId?: string): Promise<void> {
-  const tid = await resolveTeacherId(teacherId);
-  setLocal(KEYS.STUDENT, student);
-  setLocal(`ep_student_profile_${student.uid}`, student);
+  const tid = teacherId || student.selectedTeacherId || "teacher-sarah";
+  const updatedStudent = {
+    ...student,
+    selectedTeacherId: tid,
+    lastActive: new Date().toISOString()
+  };
+
+  setLocal(KEYS.STUDENT, updatedStudent);
+  setLocal(`ep_student_profile_${student.uid}`, updatedStudent);
   
   if (db) {
     try {
-      // 1. Save globally
       const studentRef = doc(db, "students", student.uid);
-      await setDoc(studentRef, {
-        ...student,
-        lastActive: new Date().toISOString()
-      }, { merge: true });
-
-      // 2. Save under teacher
-      const teacherStudentRef = doc(db, "teachers", tid, "students", student.uid);
-      await setDoc(teacherStudentRef, {
-        ...student,
-        lastActive: new Date().toISOString()
-      }, { merge: true });
+      await setDoc(studentRef, updatedStudent, { merge: true });
     } catch (e) {
       console.warn("Firestore saveStudentProfile failed, using cache:", e);
     }
@@ -87,12 +82,8 @@ export async function saveStudentProfile(student: Student, teacherId?: string): 
 }
 
 export async function getStudentProfile(uid: string, defaultName?: string, defaultEmail?: string, teacherId?: string): Promise<Student> {
-  const tid = await resolveTeacherId(teacherId);
   const cached = getLocal<Student | null>(`ep_student_profile_${uid}`, null) || getLocal<Student | null>(KEYS.STUDENT, null);
-  if (cached && cached.uid === uid) {
-    return cached;
-  }
-
+  
   const defaultProfile: Student = {
     uid,
     name: defaultName || "Student",
@@ -104,19 +95,15 @@ export async function getStudentProfile(uid: string, defaultName?: string, defau
     dailyStreak: 1,
     lastActive: new Date().toISOString(),
     points: 0,
+    selectedTeacherId: teacherId || "teacher-sarah",
     registrationDate: new Date().toISOString(),
     lastLogin: new Date().toISOString()
   };
 
   if (db) {
     try {
-      // Try teacher student first, fallback to global student
-      const teacherStudentRef = doc(db, "teachers", tid, "students", uid);
-      let snap = await getDoc(teacherStudentRef);
-      if (!snap.exists()) {
-        const studentRef = doc(db, "students", uid);
-        snap = await getDoc(studentRef);
-      }
+      const studentRef = doc(db, "students", uid);
+      const snap = await getDoc(studentRef);
       
       if (snap.exists()) {
         const data = {
@@ -129,15 +116,13 @@ export async function getStudentProfile(uid: string, defaultName?: string, defau
           data.level = "A1";
         }
         try {
-          await setDoc(doc(db, "students", uid), data, { merge: true });
-          await setDoc(teacherStudentRef, data, { merge: true });
+          await setDoc(studentRef, data, { merge: true });
         } catch {}
         setLocal(`ep_student_profile_${uid}`, data);
         setLocal(KEYS.STUDENT, data);
         return data;
       } else {
-        await setDoc(doc(db, "students", uid), defaultProfile);
-        await setDoc(teacherStudentRef, defaultProfile);
+        await setDoc(studentRef, defaultProfile);
         setLocal(`ep_student_profile_${uid}`, defaultProfile);
         setLocal(KEYS.STUDENT, defaultProfile);
         return defaultProfile;
@@ -147,103 +132,187 @@ export async function getStudentProfile(uid: string, defaultName?: string, defau
     }
   }
 
+  if (cached && cached.uid === uid) {
+    return cached;
+  }
   setLocal(KEYS.STUDENT, defaultProfile);
   return defaultProfile;
 }
 
+export function subscribeToStudentProfile(uid: string, callback: (student: Student) => void): () => void {
+  if (db) {
+    try {
+      const studentRef = doc(db, "students", uid);
+      return onSnapshot(studentRef, (snap) => {
+        if (snap.exists()) {
+          const data = snap.data() as Student;
+          setLocal(`ep_student_profile_${uid}`, data);
+          setLocal(KEYS.STUDENT, data);
+          callback(data);
+        }
+      });
+    } catch (e) {
+      console.warn("Firestore subscribeToStudentProfile failed:", e);
+    }
+  }
+  return () => {};
+}
+
 export async function getAllStudents(teacherId?: string): Promise<Student[]> {
-  const tid = await resolveTeacherId(teacherId);
+  const tid = teacherId || "all";
   const localKey = `ep_students_list_${tid}`;
   const cached = getLocal<Student[]>(localKey, []);
 
   if (db) {
     try {
-      const q = query(collection(db, "teachers", tid, "students"));
+      let q;
+      if (teacherId) {
+        q = query(collection(db, "students"), where("selectedTeacherId", "==", teacherId));
+      } else {
+        q = collection(db, "students");
+      }
       const snap = await getDocs(q);
       const list: Student[] = [];
       snap.forEach((docSnap) => {
         list.push(docSnap.data() as Student);
+      });
+      // Sort from newest to oldest based on registrationDate
+      list.sort((a, b) => {
+        const dateA = a.registrationDate ? new Date(a.registrationDate).getTime() : 0;
+        const dateB = b.registrationDate ? new Date(b.registrationDate).getTime() : 0;
+        return dateB - dateA;
       });
       if (list.length > 0) {
         setLocal(localKey, list);
         return list;
       }
     } catch (e) {
-      console.warn("Firestore getAllStudents failed, fallback to global or mock:", e);
-      // Fallback: try global students list
-      try {
-        const qGlobal = query(collection(db, "students"));
-        const snapGlobal = await getDocs(qGlobal);
-        const listGlobal: Student[] = [];
-        snapGlobal.forEach((docSnap) => {
-          listGlobal.push(docSnap.data() as Student);
-        });
-        if (listGlobal.length > 0) {
-          setLocal(localKey, listGlobal);
-          return listGlobal;
-        }
-      } catch {}
+      console.warn("Firestore getAllStudents failed, fallback to local:", e);
     }
   }
 
   if (cached && cached.length > 0) {
+    cached.sort((a, b) => {
+      const dateA = a.registrationDate ? new Date(a.registrationDate).getTime() : 0;
+      const dateB = b.registrationDate ? new Date(b.registrationDate).getTime() : 0;
+      return dateB - dateA;
+    });
     return cached;
   }
 
-  // Return dummy student list for preview if offline/empty
-  const dummyList: Student[] = [
-    {
-      uid: "dummy-1",
-      name: "أحمد العتيبي (Ahmed)",
-      email: "ahmed@example.com",
-      level: "B1",
-      progress: 65,
-      completedLessons: ["grammar-1"],
-      savedWords: ["vocab-1", "vocab-2"],
-      dailyStreak: 5,
-      lastActive: new Date().toISOString(),
-      points: 120
-    },
-    {
-      uid: "dummy-2",
-      name: "سارة خالد (Sarah)",
-      email: "sarah@example.com",
-      level: "A1",
-      progress: 33,
-      completedLessons: [],
-      savedWords: ["vocab-3"],
-      dailyStreak: 2,
-      lastActive: new Date(Date.now() - 3600000).toISOString(),
-      points: 40
+  return [];
+}
+
+export function subscribeToStudents(teacherId: string, callback: (students: Student[]) => void) {
+  const localKey = `ep_students_list_${teacherId}`;
+  if (db) {
+    try {
+      const q = query(collection(db, "students"), where("selectedTeacherId", "==", teacherId));
+      return onSnapshot(q, (snap) => {
+        const list: Student[] = [];
+        snap.forEach((docSnap) => {
+          list.push(docSnap.data() as Student);
+        });
+        // Sort from newest to oldest based on registrationDate
+        list.sort((a, b) => {
+          const dateA = a.registrationDate ? new Date(a.registrationDate).getTime() : 0;
+          const dateB = b.registrationDate ? new Date(b.registrationDate).getTime() : 0;
+          return dateB - dateA;
+        });
+        setLocal(localKey, list);
+        callback(list);
+      }, (err) => {
+        console.warn("Firestore subscribeToStudents failed, using cache:", err);
+        const cached = getLocal<Student[]>(localKey, []);
+        cached.sort((a, b) => {
+          const dateA = a.registrationDate ? new Date(a.registrationDate).getTime() : 0;
+          const dateB = b.registrationDate ? new Date(b.registrationDate).getTime() : 0;
+          return dateB - dateA;
+        });
+        callback(cached);
+      });
+    } catch (e) {
+      console.warn("Firestore subscribeToStudents setup failed:", e);
     }
-  ];
-  setLocal(localKey, dummyList);
-  return dummyList;
+  }
+  const cached = getLocal<Student[]>(localKey, []);
+  cached.sort((a, b) => {
+    const dateA = a.registrationDate ? new Date(a.registrationDate).getTime() : 0;
+    const dateB = b.registrationDate ? new Date(b.registrationDate).getTime() : 0;
+    return dateB - dateA;
+  });
+  callback(cached);
+  return () => {};
+}
+
+export function subscribeToAllStudents(callback: (students: Student[]) => void): () => void {
+  const localKey = "ep_students_list_all";
+  if (db) {
+    try {
+      const q = collection(db, "students");
+      return onSnapshot(q, (snap) => {
+        const list: Student[] = [];
+        snap.forEach((docSnap) => {
+          list.push(docSnap.data() as Student);
+        });
+        // Sort from newest to oldest based on registrationDate
+        list.sort((a, b) => {
+          const dateA = a.registrationDate ? new Date(a.registrationDate).getTime() : 0;
+          const dateB = b.registrationDate ? new Date(b.registrationDate).getTime() : 0;
+          return dateB - dateA;
+        });
+        setLocal(localKey, list);
+        callback(list);
+      }, (err) => {
+        console.warn("Firestore subscribeToAllStudents failed, using cache:", err);
+        const cached = getLocal<Student[]>(localKey, []);
+        cached.sort((a, b) => {
+          const dateA = a.registrationDate ? new Date(a.registrationDate).getTime() : 0;
+          const dateB = b.registrationDate ? new Date(b.registrationDate).getTime() : 0;
+          return dateB - dateA;
+        });
+        callback(cached);
+      });
+    } catch (e) {
+      console.warn("Firestore subscribeToAllStudents setup failed:", e);
+    }
+  }
+  const cached = getLocal<Student[]>(localKey, []);
+  cached.sort((a, b) => {
+    const dateA = a.registrationDate ? new Date(a.registrationDate).getTime() : 0;
+    const dateB = b.registrationDate ? new Date(b.registrationDate).getTime() : 0;
+    return dateB - dateA;
+  });
+  callback(cached);
+  return () => {};
 }
 
 export async function updateStudent(student: Student, teacherId?: string): Promise<void> {
-  const tid = await resolveTeacherId(teacherId);
+  const tid = teacherId || student.selectedTeacherId || "teacher-sarah";
   const localKey = `ep_students_list_${tid}`;
   const current = getLocal<Student[]>(localKey, []);
-  const index = current.findIndex(s => s.uid === student.uid);
+  
+  const updatedStudent = {
+    ...student,
+    selectedTeacherId: tid
+  };
+
+  const index = current.findIndex(s => s.uid === updatedStudent.uid);
   if (index > -1) {
-    current[index] = student;
+    current[index] = updatedStudent;
   } else {
-    current.push(student);
+    current.push(updatedStudent);
   }
   setLocal(localKey, current);
   
   // Also update individual cached student
-  setLocal(`ep_student_profile_${student.uid}`, student);
-  setLocal(KEYS.STUDENT, student);
+  setLocal(`ep_student_profile_${updatedStudent.uid}`, updatedStudent);
+  setLocal(KEYS.STUDENT, updatedStudent);
 
   if (db) {
     try {
-      const studentRef = doc(db, "students", student.uid);
-      await setDoc(studentRef, student, { merge: true });
-
-      const teacherStudentRef = doc(db, "teachers", tid, "students", student.uid);
-      await setDoc(teacherStudentRef, student, { merge: true });
+      const studentRef = doc(db, "students", updatedStudent.uid);
+      await setDoc(studentRef, updatedStudent, { merge: true });
     } catch (e) {
       console.warn("Firestore updateStudent failed:", e);
     }
@@ -251,7 +320,7 @@ export async function updateStudent(student: Student, teacherId?: string): Promi
 }
 
 export async function deleteStudent(uid: string, teacherId?: string): Promise<void> {
-  const tid = await resolveTeacherId(teacherId);
+  const tid = teacherId || "teacher-sarah";
   const localKey = `ep_students_list_${tid}`;
   const current = getLocal<Student[]>(localKey, []);
   const filtered = current.filter(s => s.uid !== uid);
@@ -267,7 +336,6 @@ export async function deleteStudent(uid: string, teacherId?: string): Promise<vo
   if (db) {
     try {
       await deleteDoc(doc(db, "students", uid));
-      await deleteDoc(doc(db, "teachers", tid, "students", uid));
     } catch (e) {
       console.warn("Firestore deleteStudent failed:", e);
     }
@@ -288,28 +356,24 @@ export async function getTeachers(): Promise<Teacher[]> {
       if (list.length === 0) {
         const defaults: Teacher[] = [
           {
-            uid: "teacher-thomas",
-            name: "Professor Thomas",
-            email: "thomas@pathwayacademy.com",
-            photoUrl: "https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?w=150",
-            loginCode: "123456",
-            createdAt: new Date().toISOString()
-          },
-          {
             uid: "teacher-sarah",
             name: "Professor Sarah",
-            email: "sarah@pathwayacademy.com",
+            email: "sarah@pathwaylanguages.com",
             photoUrl: "https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=150",
             loginCode: "123456",
-            createdAt: new Date().toISOString()
+            createdAt: new Date().toISOString(),
+            specialty: "IELTS Prep & Conversation",
+            specialtyAr: "خبير آيلتس والمحادثة التفاعلية"
           },
           {
             uid: "teacher-james",
             name: "Professor James",
-            email: "james@pathwayacademy.com",
+            email: "james@pathwaylanguages.com",
             photoUrl: "https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=150",
             loginCode: "123456",
-            createdAt: new Date().toISOString()
+            createdAt: new Date().toISOString(),
+            specialty: "Business English & Grammar",
+            specialtyAr: "اللغة الإنجليزية للأعمال والقواعد"
           }
         ];
         for (const t of defaults) {
@@ -336,6 +400,28 @@ export async function getTeachers(): Promise<Teacher[]> {
     }
   }
   return localList;
+}
+
+export function subscribeToTeachers(callback: (teachers: Teacher[]) => void) {
+  if (db) {
+    try {
+      return onSnapshot(collection(db, "teachers"), (snap) => {
+        const list: Teacher[] = [];
+        snap.forEach((docSnap) => {
+          list.push(docSnap.data() as Teacher);
+        });
+        setLocal(KEYS.TEACHERS, list);
+        callback(list);
+      }, (err) => {
+        console.warn("Firestore subscribeToTeachers failed, using cache:", err);
+        callback(getLocal<Teacher[]>(KEYS.TEACHERS, []));
+      });
+    } catch (e) {
+      console.warn("Firestore subscribeToTeachers setup failed:", e);
+    }
+  }
+  callback(getLocal<Teacher[]>(KEYS.TEACHERS, []));
+  return () => {};
 }
 
 export async function addTeacher(teacher: Teacher): Promise<void> {
@@ -424,9 +510,40 @@ export async function clearAllTeachers(): Promise<void> {
   }
 }
 
+export async function purgeEntireSystem(): Promise<void> {
+  // Clear all LocalStorage keys
+  try {
+    localStorage.clear();
+  } catch (e) {
+    console.error("Failed to clear local storage:", e);
+  }
+
+  // Clear Firestore Collections
+  if (db) {
+    try {
+      // 1. Clear Students
+      const studentsSnap = await getDocs(collection(db, "students"));
+      for (const d of studentsSnap.docs) {
+        await deleteDoc(doc(db, "students", d.id));
+      }
+
+      // 2. Clear Teachers and subcollections
+      await clearAllTeachers();
+
+      // 3. Clear Announcements
+      const annSnap = await getDocs(collection(db, "announcements"));
+      for (const d of annSnap.docs) {
+        await deleteDoc(doc(db, "announcements", d.id));
+      }
+    } catch (e) {
+      console.error("Firestore global purge failed:", e);
+    }
+  }
+}
+
 // ================= LESSONS SERVICE =================
 export async function getLessons(teacherId?: string): Promise<Lesson[]> {
-  const tid = await resolveTeacherId(teacherId);
+  const tid = teacherId || "teacher-sarah";
   const localKey = `ep_lessons_list_${tid}`;
   const localList = getLocal<Lesson[]>(localKey, []);
   
@@ -440,9 +557,16 @@ export async function getLessons(teacherId?: string): Promise<Lesson[]> {
       if (list.length > 0) {
         setLocal(localKey, list);
         return list;
+      } else {
+        // Seed teacher collection
+        for (const l of defaultLessons) {
+          await setDoc(doc(db, "teachers", tid, "lessons", l.id), l);
+        }
+        setLocal(localKey, defaultLessons);
+        return defaultLessons;
       }
     } catch (e) {
-      console.warn("Firestore getLessons failed, using local:", e);
+      console.warn(`Firestore getLessons failed for teacher ${tid}, using local:`, e);
     }
   }
 
@@ -454,7 +578,7 @@ export async function getLessons(teacherId?: string): Promise<Lesson[]> {
 }
 
 export async function saveLesson(lesson: Lesson, teacherId?: string): Promise<void> {
-  const tid = await resolveTeacherId(teacherId);
+  const tid = teacherId || "teacher-sarah";
   const localKey = `ep_lessons_list_${tid}`;
   const current = await getLessons(tid);
   const index = current.findIndex(l => l.id === lesson.id);
@@ -475,7 +599,7 @@ export async function saveLesson(lesson: Lesson, teacherId?: string): Promise<vo
 }
 
 export async function deleteLesson(id: string, teacherId?: string): Promise<void> {
-  const tid = await resolveTeacherId(teacherId);
+  const tid = teacherId || "teacher-sarah";
   const localKey = `ep_lessons_list_${tid}`;
   const current = await getLessons(tid);
   const filtered = current.filter(l => l.id !== id);
@@ -493,7 +617,7 @@ export async function deleteLesson(id: string, teacherId?: string): Promise<void
 
 // ================= VOCABULARY SERVICE =================
 export async function getVocabulary(teacherId?: string): Promise<Vocabulary[]> {
-  const tid = teacherId || "teacher-thomas";
+  const tid = teacherId || "teacher-sarah";
   const localKey = `ep_vocab_list_${tid}`;
   const localList = getLocal<Vocabulary[]>(localKey, []);
   
@@ -507,9 +631,16 @@ export async function getVocabulary(teacherId?: string): Promise<Vocabulary[]> {
       if (list.length > 0) {
         setLocal(localKey, list);
         return list;
+      } else {
+        // Seed teacher collection
+        for (const v of defaultVocabulary) {
+          await setDoc(doc(db, "teachers", tid, "vocabulary", v.id), v);
+        }
+        setLocal(localKey, defaultVocabulary);
+        return defaultVocabulary;
       }
     } catch (e) {
-      console.warn("Firestore getVocabulary failed, using local:", e);
+      console.warn(`Firestore getVocabulary failed for teacher ${tid}, using local:`, e);
     }
   }
 
@@ -521,7 +652,7 @@ export async function getVocabulary(teacherId?: string): Promise<Vocabulary[]> {
 }
 
 export async function saveVocabulary(word: Vocabulary, teacherId?: string): Promise<void> {
-  const tid = teacherId || "teacher-thomas";
+  const tid = teacherId || "teacher-sarah";
   const localKey = `ep_vocab_list_${tid}`;
   const current = await getVocabulary(tid);
   const index = current.findIndex(w => w.id === word.id);
@@ -542,7 +673,7 @@ export async function saveVocabulary(word: Vocabulary, teacherId?: string): Prom
 }
 
 export async function deleteVocabulary(id: string, teacherId?: string): Promise<void> {
-  const tid = teacherId || "teacher-thomas";
+  const tid = teacherId || "teacher-sarah";
   const localKey = `ep_vocab_list_${tid}`;
   const current = await getVocabulary(tid);
   const filtered = current.filter(w => w.id !== id);
@@ -560,8 +691,8 @@ export async function deleteVocabulary(id: string, teacherId?: string): Promise<
 
 // ================= LIVE SESSIONS SERVICE =================
 export async function getLiveSessions(teacherId?: string): Promise<LiveSession[]> {
-  const tid = teacherId || "teacher-thomas";
-  const localKey = `ep_live_sessions_${tid}`;
+  const tid = teacherId || "teacher-sarah";
+  const localKey = `ep_live_sessions_list_${tid}`;
   const localList = getLocal<LiveSession[]>(localKey, []);
   
   if (db) {
@@ -574,9 +705,16 @@ export async function getLiveSessions(teacherId?: string): Promise<LiveSession[]
       if (list.length > 0) {
         setLocal(localKey, list);
         return list;
+      } else {
+        // Seed teacher collection
+        for (const s of defaultLiveSessions) {
+          await setDoc(doc(db, "teachers", tid, "liveSessions", s.id), s);
+        }
+        setLocal(localKey, defaultLiveSessions);
+        return defaultLiveSessions;
       }
     } catch (e) {
-      console.warn("Firestore getLiveSessions failed, using local:", e);
+      console.warn(`Firestore getLiveSessions failed for teacher ${tid}, using local:`, e);
     }
   }
 
@@ -588,8 +726,8 @@ export async function getLiveSessions(teacherId?: string): Promise<LiveSession[]
 }
 
 export async function saveLiveSession(session: LiveSession, teacherId?: string): Promise<void> {
-  const tid = teacherId || "teacher-thomas";
-  const localKey = `ep_live_sessions_${tid}`;
+  const tid = teacherId || "teacher-sarah";
+  const localKey = `ep_live_sessions_list_${tid}`;
   const current = await getLiveSessions(tid);
   const index = current.findIndex(s => s.id === session.id);
   if (index > -1) {
@@ -609,8 +747,8 @@ export async function saveLiveSession(session: LiveSession, teacherId?: string):
 }
 
 export async function deleteLiveSession(id: string, teacherId?: string): Promise<void> {
-  const tid = teacherId || "teacher-thomas";
-  const localKey = `ep_live_sessions_${tid}`;
+  const tid = teacherId || "teacher-sarah";
+  const localKey = `ep_live_sessions_list_${tid}`;
   const current = await getLiveSessions(tid);
   const filtered = current.filter(s => s.id !== id);
   setLocal(localKey, filtered);
@@ -655,8 +793,15 @@ export async function getChatHistory(chatId: string): Promise<ChatMessage[]> {
 
 export async function addChatMessage(chatId: string, msg: ChatMessage): Promise<void> {
   const localKey = `${KEYS.CHATS}_${chatId}`;
-  const current = getLocal<ChatMessage[]>(localKey, []);
-  current.push(msg);
+  let current = getLocal<ChatMessage[]>(localKey, []);
+  
+  // Prevent duplicate message IDs in cache
+  const exists = current.some((m) => m.id === msg.id);
+  if (!exists) {
+    current.push(msg);
+  } else {
+    current = current.map((m) => (m.id === msg.id ? msg : m));
+  }
   setLocal(localKey, current);
 
   if (db) {
@@ -701,12 +846,13 @@ export function subscribeToChat(chatId: string, callback: (msgs: ChatMessage[]) 
 }
 
 // ================= ANNOUNCEMENTS SERVICE =================
-export async function getAnnouncements(): Promise<Announcement[]> {
-  const localKey = "ep_announcements_list";
+export async function getAnnouncements(teacherId?: string): Promise<Announcement[]> {
+  const tid = teacherId || "teacher-sarah";
+  const localKey = `ep_announcements_list_${tid}`;
   const localList = getLocal<Announcement[]>(localKey, []);
   if (db) {
     try {
-      const snap = await getDocs(collection(db, "announcements"));
+      const snap = await getDocs(collection(db, "teachers", tid, "announcements"));
       const list: Announcement[] = [];
       snap.forEach((docSnap) => {
         list.push(docSnap.data() as Announcement);
@@ -716,36 +862,38 @@ export async function getAnnouncements(): Promise<Announcement[]> {
       setLocal(localKey, list);
       return list;
     } catch (e) {
-      console.warn("Firestore getAnnouncements failed, using local list:", e);
+      console.warn(`Firestore getAnnouncements failed for teacher ${tid}, using local list:`, e);
     }
   }
   return localList;
 }
 
-export async function saveAnnouncement(announcement: Announcement): Promise<void> {
-  const localKey = "ep_announcements_list";
+export async function saveAnnouncement(announcement: Announcement, teacherId?: string): Promise<void> {
+  const tid = teacherId || announcement.teacherId || "teacher-sarah";
+  const localKey = `ep_announcements_list_${tid}`;
   const current = getLocal<Announcement[]>(localKey, []);
   const updated = [announcement, ...current.filter(a => a.id !== announcement.id)];
   setLocal(localKey, updated);
 
   if (db) {
     try {
-      await setDoc(doc(db, "announcements", announcement.id), announcement);
+      await setDoc(doc(db, "teachers", tid, "announcements", announcement.id), announcement);
     } catch (e) {
       console.warn("Firestore saveAnnouncement failed:", e);
     }
   }
 }
 
-export async function deleteAnnouncement(id: string): Promise<void> {
-  const localKey = "ep_announcements_list";
+export async function deleteAnnouncement(id: string, teacherId?: string): Promise<void> {
+  const tid = teacherId || "teacher-sarah";
+  const localKey = `ep_announcements_list_${tid}`;
   const current = getLocal<Announcement[]>(localKey, []);
   const updated = current.filter(a => a.id !== id);
   setLocal(localKey, updated);
 
   if (db) {
     try {
-      await deleteDoc(doc(db, "announcements", id));
+      await deleteDoc(doc(db, "teachers", tid, "announcements", id));
     } catch (e) {
       console.warn("Firestore deleteAnnouncement failed:", e);
     }
@@ -775,49 +923,83 @@ const defaultDailyTasks = (studentId: string): DailyTask[] => [
   {
     id: `dt_chat_${studentId}`,
     studentId,
-    title: "Practice writing with Professor Thomas",
-    titleAr: "تدرب على الكتابة بالتحدث مع الأستاذ توماس",
+    title: "Practice writing with Professor Sarah",
+    titleAr: "تدرب على الكتابة بالتحدث مع الأستاذة سارة",
     completed: false,
     date: new Date().toISOString().split("T")[0],
     createdAt: new Date().toISOString()
   }
 ];
 
-const defaultWeeklyTasks = (studentId: string): WeeklyTask[] => [
+export const defaultWeeklyTasks = (teacherId: string = "teacher-sarah"): WeeklyTask[] => [
   {
-    id: `wt_1_${studentId}`,
-    studentId,
-    title: "Complete at least 3 grammar lessons",
-    titleAr: "أكمل 3 دروس قواعد على الأقل",
-    completed: false,
-    weekLabel: "Week 1: grammar" ,
+    id: `wt_sat_${teacherId}`,
+    teacherId,
+    title: "Review the grammar guide for the week",
+    titleAr: "مراجعة دليل قواعد هذا الأسبوع",
+    day: "saturday",
+    order: 1,
+    level: "All",
     createdAt: new Date().toISOString()
   },
   {
-    id: `wt_2_${studentId}`,
-    studentId,
-    title: "Save 10 new vocabulary words",
-    titleAr: "احفظ 10 كلمات ومصطلحات جديدة",
-    completed: false,
-    weekLabel: "Week 1: grammar",
+    id: `wt_sun_${teacherId}`,
+    teacherId,
+    title: "Complete your first level lesson",
+    titleAr: "أكمل الدرس الأول المحدد لمستواك",
+    day: "sunday",
+    order: 2,
+    level: "All",
     createdAt: new Date().toISOString()
   },
   {
-    id: `wt_3_${studentId}`,
-    studentId,
-    title: "Attend the interactive live seminar",
-    titleAr: "احضر الندوة الأسبوعية المباشرة",
-    completed: false,
-    weekLabel: "Week 1: grammar",
+    id: `wt_mon_${teacherId}`,
+    teacherId,
+    title: "Collect 5 new words in your vocabulary list",
+    titleAr: "حفظ 5 كلمات جديدة في قائمة المفردات",
+    day: "monday",
+    order: 3,
+    level: "All",
     createdAt: new Date().toISOString()
   },
   {
-    id: `wt_4_${studentId}`,
-    studentId,
-    title: "Have a chat session of 5+ messages with the AI Teacher",
-    titleAr: "أجرِ محادثة من 5 رسائل أو أكثر مع المعلم الذكي",
-    completed: false,
-    weekLabel: "Week 1: grammar",
+    id: `wt_tue_${teacherId}`,
+    teacherId,
+    title: "Engage in an interactive practice session",
+    titleAr: "المشاركة في جلسة التدريب التفاعلية",
+    day: "tuesday",
+    order: 4,
+    level: "All",
+    createdAt: new Date().toISOString()
+  },
+  {
+    id: `wt_wed_${teacherId}`,
+    teacherId,
+    title: "Take the weekly self-evaluation quiz",
+    titleAr: "إجراء اختبار التقييم الذاتي الأسبوعي",
+    day: "wednesday",
+    order: 5,
+    level: "All",
+    createdAt: new Date().toISOString()
+  },
+  {
+    id: `wt_thu_${teacherId}`,
+    teacherId,
+    title: "Practice writing a summary of what you learned",
+    titleAr: "تدرب على كتابة ملخص لما تعلمته",
+    day: "thursday",
+    order: 6,
+    level: "All",
+    createdAt: new Date().toISOString()
+  },
+  {
+    id: `wt_fri_${teacherId}`,
+    teacherId,
+    title: "Review all vocabulary and lessons before the weekend",
+    titleAr: "مراجعة جميع المفردات والدروس قبل عطلة نهاية الأسبوع",
+    day: "friday",
+    order: 7,
+    level: "All",
     createdAt: new Date().toISOString()
   }
 ];
@@ -894,70 +1076,953 @@ export async function deleteDailyTask(studentId: string, taskId: string): Promis
 }
 
 // ================= WEEKLY TASKS SERVICE =================
-export async function getWeeklyTasks(studentId: string): Promise<WeeklyTask[]> {
-  const localKey = `ep_weekly_tasks_${studentId}`;
-  let localList = getLocal<WeeklyTask[]>(localKey, []);
+export function subscribeToWeeklyTasks(callback: (tasks: WeeklyTask[]) => void, teacherId: string = "teacher-sarah") {
+  const localKey = `ep_teacher_weekly_tasks_${teacherId}`;
+  const localList = getLocal<WeeklyTask[]>(localKey, []);
 
   if (localList.length === 0) {
-    localList = defaultWeeklyTasks(studentId);
-    setLocal(localKey, localList);
+    const defaults = defaultWeeklyTasks(teacherId);
+    setLocal(localKey, defaults);
+    callback(defaults);
+  } else {
+    callback(localList);
   }
 
   if (db) {
     try {
-      const q = query(
-        collection(db, "students", studentId, "weekly_tasks")
-      );
-      const snap = await getDocs(q);
-      const list: WeeklyTask[] = [];
-      snap.forEach((docSnap) => {
-        list.push(docSnap.data() as WeeklyTask);
-      });
-      
-      if (list.length > 0) {
-        setLocal(localKey, list);
-        return list;
-      } else {
-        // Seed
-        for (const t of localList) {
-          await setDoc(doc(db, "students", studentId, "weekly_tasks", t.id), t);
+      const colRef = collection(db, "teachers", teacherId, "weekly_tasks");
+      return onSnapshot(colRef, async (snap) => {
+        const list: WeeklyTask[] = [];
+        snap.forEach((docSnap) => {
+          list.push(docSnap.data() as WeeklyTask);
+        });
+
+        if (list.length === 0) {
+          const defaults = defaultWeeklyTasks(teacherId);
+          for (const t of defaults) {
+            await setDoc(doc(db, "teachers", teacherId, "weekly_tasks", t.id), t);
+          }
+          setLocal(localKey, defaults);
+          callback(defaults);
+        } else {
+          const sorted = list.sort((a, b) => (a.order || 0) - (b.order || 0));
+          setLocal(localKey, sorted);
+          callback(sorted);
         }
-      }
+      }, (err) => {
+        console.warn("Firestore subscribeToWeeklyTasks failed:", err);
+      });
     } catch (e) {
-      console.warn("Firestore getWeeklyTasks failed, using local:", e);
+      console.warn("Firestore subscribeToWeeklyTasks setup failed:", e);
     }
   }
-  return localList;
+
+  return () => {};
 }
 
-export async function saveWeeklyTask(studentId: string, task: WeeklyTask): Promise<void> {
-  const localKey = `ep_weekly_tasks_${studentId}`;
+export async function saveWeeklyTask(teacherId: string, task: WeeklyTask): Promise<void> {
+  const localKey = `ep_teacher_weekly_tasks_${teacherId}`;
   const current = getLocal<WeeklyTask[]>(localKey, []);
   const updated = current.some(t => t.id === task.id)
     ? current.map(t => t.id === task.id ? task : t)
     : [...current, task];
-  setLocal(localKey, updated);
+  const sorted = updated.sort((a, b) => (a.order || 0) - (b.order || 0));
+  setLocal(localKey, sorted);
 
   if (db) {
     try {
-      await setDoc(doc(db, "students", studentId, "weekly_tasks", task.id), task);
+      await setDoc(doc(db, "teachers", teacherId, "weekly_tasks", task.id), task);
     } catch (e) {
       console.warn("Firestore saveWeeklyTask failed:", e);
     }
   }
 }
 
-export async function deleteWeeklyTask(studentId: string, taskId: string): Promise<void> {
-  const localKey = `ep_weekly_tasks_${studentId}`;
+export async function deleteWeeklyTask(teacherId: string, taskId: string): Promise<void> {
+  const localKey = `ep_teacher_weekly_tasks_${teacherId}`;
   const current = getLocal<WeeklyTask[]>(localKey, []);
   const updated = current.filter(t => t.id !== taskId);
   setLocal(localKey, updated);
 
   if (db) {
     try {
-      await deleteDoc(doc(db, "students", studentId, "weekly_tasks", taskId));
+      await deleteDoc(doc(db, "teachers", teacherId, "weekly_tasks", taskId));
     } catch (e) {
       console.warn("Firestore deleteWeeklyTask failed:", e);
     }
   }
 }
+
+// ================= RESOURCES & TIPS SERVICE =================
+const RESOURCES_TIPS_KEY = "ep_resources_tips";
+
+const defaultResourcesAndTips: ResourceOrTip[] = [
+  {
+    id: "default-res-1",
+    type: "resource",
+    title: "Cambridge English Dictionary",
+    url: "https://dictionary.cambridge.org",
+    content: "An excellent online dictionary to check pronunciation, phonetic transcription, and real examples.",
+    level: "All",
+    createdAt: "2026-06-25T00:00:00Z"
+  },
+  {
+    id: "default-tip-1",
+    type: "tip",
+    title: "How to master vocabulary",
+    content: "Always write down words in a full sentence. Do not memorize single isolated words; context is everything!",
+    level: "A1",
+    createdAt: "2026-06-25T00:00:00Z"
+  }
+];
+
+export async function getResourcesAndTips(teacherId?: string): Promise<ResourceOrTip[]> {
+  const tid = teacherId || "teacher-sarah";
+  const localKey = `ep_resources_tips_${tid}`;
+  const cached = getLocal<ResourceOrTip[]>(localKey, []);
+  if (db) {
+    try {
+      const snap = await getDocs(collection(db, "teachers", tid, "resources_tips"));
+      const list: ResourceOrTip[] = [];
+      snap.forEach((dSnap) => {
+        list.push(dSnap.data() as ResourceOrTip);
+      });
+      if (list.length > 0) {
+        setLocal(localKey, list);
+        return list;
+      } else {
+        // Seed default
+        for (const item of defaultResourcesAndTips) {
+          await setDoc(doc(db, "teachers", tid, "resources_tips", item.id), item);
+        }
+        setLocal(localKey, defaultResourcesAndTips);
+        return defaultResourcesAndTips;
+      }
+    } catch (e) {
+      console.warn(`Firestore getResourcesAndTips failed for teacher ${tid}, using cache:`, e);
+    }
+  }
+  return cached.length > 0 ? cached : defaultResourcesAndTips;
+}
+
+export function subscribeToResourcesAndTips(callback: (items: ResourceOrTip[]) => void, teacherId?: string) {
+  const tid = teacherId || "teacher-sarah";
+  const localKey = `ep_resources_tips_${tid}`;
+  if (db) {
+    try {
+      return onSnapshot(collection(db, "teachers", tid, "resources_tips"), (snap) => {
+        const list: ResourceOrTip[] = [];
+        snap.forEach((dSnap) => {
+          list.push(dSnap.data() as ResourceOrTip);
+        });
+        if (list.length > 0) {
+          setLocal(localKey, list);
+          callback(list);
+        } else {
+          callback(defaultResourcesAndTips);
+        }
+      }, (err) => {
+        console.warn("Firestore subscribeToResourcesAndTips failed, using cache:", err);
+        callback(getLocal<ResourceOrTip[]>(localKey, defaultResourcesAndTips));
+      });
+    } catch (e) {
+      console.warn("Firestore subscribeToResourcesAndTips setup failed:", e);
+    }
+  }
+  callback(getLocal<ResourceOrTip[]>(localKey, defaultResourcesAndTips));
+  return () => {};
+}
+
+export function subscribeToLessons(callback: (lessons: Lesson[]) => void, teacherId?: string): () => void {
+  const tid = teacherId || "teacher-sarah";
+  const localKey = `ep_lessons_list_${tid}`;
+  if (db) {
+    try {
+      return onSnapshot(collection(db, "teachers", tid, "lessons"), (snap) => {
+        const list: Lesson[] = [];
+        snap.forEach((docSnap) => {
+          list.push(docSnap.data() as Lesson);
+        });
+        if (list.length > 0) {
+          setLocal(localKey, list);
+          callback(list);
+        } else {
+          callback(defaultLessons);
+        }
+      }, (err) => {
+        console.warn("Firestore subscribeToLessons failed, using cache:", err);
+        callback(getLocal<Lesson[]>(localKey, defaultLessons));
+      });
+    } catch (e) {
+      console.warn("Firestore subscribeToLessons setup failed:", e);
+    }
+  }
+  callback(getLocal<Lesson[]>(localKey, defaultLessons));
+  return () => {};
+}
+
+export function subscribeToVocabulary(callback: (vocab: Vocabulary[]) => void, teacherId?: string): () => void {
+  const tid = teacherId || "teacher-sarah";
+  const localKey = `ep_vocab_list_${tid}`;
+  if (db) {
+    try {
+      return onSnapshot(collection(db, "teachers", tid, "vocabulary"), (snap) => {
+        const list: Vocabulary[] = [];
+        snap.forEach((docSnap) => {
+          list.push(docSnap.data() as Vocabulary);
+        });
+        if (list.length > 0) {
+          setLocal(localKey, list);
+          callback(list);
+        } else {
+          callback(defaultVocabulary);
+        }
+      }, (err) => {
+        console.warn("Firestore subscribeToVocabulary failed, using cache:", err);
+        callback(getLocal<Vocabulary[]>(localKey, defaultVocabulary));
+      });
+    } catch (e) {
+      console.warn("Firestore subscribeToVocabulary setup failed:", e);
+    }
+  }
+  callback(getLocal<Vocabulary[]>(localKey, defaultVocabulary));
+  return () => {};
+}
+
+export function subscribeToLiveSessions(callback: (sessions: LiveSession[]) => void, teacherId?: string): () => void {
+  const tid = teacherId || "teacher-sarah";
+  const localKey = `ep_live_sessions_list_${tid}`;
+  if (db) {
+    try {
+      return onSnapshot(collection(db, "teachers", tid, "liveSessions"), (snap) => {
+        const list: LiveSession[] = [];
+        snap.forEach((docSnap) => {
+          list.push(docSnap.data() as LiveSession);
+        });
+        if (list.length > 0) {
+          setLocal(localKey, list);
+          callback(list);
+        } else {
+          callback(defaultLiveSessions);
+        }
+      }, (err) => {
+        console.warn("Firestore subscribeToLiveSessions failed, using cache:", err);
+        callback(getLocal<LiveSession[]>(localKey, defaultLiveSessions));
+      });
+    } catch (e) {
+      console.warn("Firestore subscribeToLiveSessions setup failed:", e);
+    }
+  }
+  callback(getLocal<LiveSession[]>(localKey, defaultLiveSessions));
+  return () => {};
+}
+
+export function subscribeToAnnouncements(callback: (announcements: Announcement[]) => void, teacherId?: string): () => void {
+  const tid = teacherId || "teacher-sarah";
+  const localKey = `ep_announcements_list_${tid}`;
+  if (db) {
+    try {
+      return onSnapshot(collection(db, "teachers", tid, "announcements"), (snap) => {
+        const list: Announcement[] = [];
+        snap.forEach((docSnap) => {
+          list.push(docSnap.data() as Announcement);
+        });
+        list.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+        setLocal(localKey, list);
+        callback(list);
+      }, (err) => {
+        console.warn("Firestore subscribeToAnnouncements failed, using cache:", err);
+        callback(getLocal<Announcement[]>(localKey, []));
+      });
+    } catch (e) {
+      console.warn("Firestore subscribeToAnnouncements setup failed:", e);
+    }
+  }
+  callback(getLocal<Announcement[]>(localKey, []));
+  return () => {};
+}
+
+export async function saveResourceOrTip(item: ResourceOrTip, teacherId?: string): Promise<void> {
+  const tid = teacherId || "teacher-sarah";
+  const localKey = `ep_resources_tips_${tid}`;
+  const current = getLocal<ResourceOrTip[]>(localKey, []);
+  const updated = current.some(x => x.id === item.id)
+    ? current.map(x => x.id === item.id ? item : x)
+    : [...current, item];
+  setLocal(localKey, updated);
+
+  if (db) {
+    try {
+      await setDoc(doc(db, "teachers", tid, "resources_tips", item.id), item);
+    } catch (e) {
+      console.warn("Firestore saveResourceOrTip failed:", e);
+    }
+  }
+}
+
+export async function deleteResourceOrTip(id: string, teacherId?: string): Promise<void> {
+  const tid = teacherId || "teacher-sarah";
+  const localKey = `ep_resources_tips_${tid}`;
+  const current = getLocal<ResourceOrTip[]>(localKey, []);
+  const updated = current.filter(x => x.id !== id);
+  setLocal(localKey, updated);
+
+  if (db) {
+    try {
+      await deleteDoc(doc(db, "teachers", tid, "resources_tips", id));
+    } catch (e) {
+      console.warn("Firestore deleteResourceOrTip failed:", e);
+    }
+  }
+}
+
+// ================= TRAINING & TYPING SERVICES =================
+
+const TOPICS_KEY = "ep_training_topics";
+const QUESTIONS_KEY = "ep_training_questions";
+const TYPING_KEY = "ep_typing_sentences";
+
+const defaultTrainingTopics: TrainingTopic[] = [
+  // speaking topics
+  { id: "sp-a1-1", name: "Introducing Yourself", level: "A1", language: "en", order: 1, type: "speaking", createdAt: new Date().toISOString() },
+  { id: "sp-a1-2", name: "My Favorite Hobbies", level: "A1", language: "en", order: 2, type: "speaking", createdAt: new Date().toISOString() },
+  { id: "sp-a2-1", name: "My Typical Daily Life", level: "A2", language: "en", order: 1, type: "speaking", createdAt: new Date().toISOString() },
+  { id: "sp-a2-2", name: "Shopping and Foods", level: "A2", language: "en", order: 2, type: "speaking", createdAt: new Date().toISOString() },
+  { id: "sp-b1-1", name: "Travel & Exploration", level: "B1", language: "en", order: 1, type: "speaking", createdAt: new Date().toISOString() },
+  { id: "sp-b1-2", name: "Future Career Goals", level: "B1", language: "en", order: 2, type: "speaking", createdAt: new Date().toISOString() },
+  { id: "sp-b2-1", name: "The Digital Age & Internet", level: "B2", language: "en", order: 1, type: "speaking", createdAt: new Date().toISOString() },
+  { id: "sp-b2-2", name: "Teamwork vs Solo Work", level: "B2", language: "en", order: 2, type: "speaking", createdAt: new Date().toISOString() },
+  { id: "sp-c1-1", name: "Solving Climate Change", level: "C1", language: "en", order: 1, type: "speaking", createdAt: new Date().toISOString() },
+  { id: "sp-c1-2", name: "The Purpose of Modern Art", level: "C1", language: "en", order: 2, type: "speaking", createdAt: new Date().toISOString() },
+  { id: "sp-c2-1", name: "Ethics of Artificial Intelligence", level: "C2", language: "en", order: 1, type: "speaking", createdAt: new Date().toISOString() },
+  { id: "sp-c2-2", name: "Globalization and Identity", level: "C2", language: "en", order: 2, type: "speaking", createdAt: new Date().toISOString() },
+
+  // writing topics
+  { id: "wr-a1-1", name: "My Best Friend", level: "A1", language: "en", order: 1, type: "writing", createdAt: new Date().toISOString() },
+  { id: "wr-a1-2", name: "My Favorite Season", level: "A1", language: "en", order: 2, type: "writing", createdAt: new Date().toISOString() },
+  { id: "wr-a2-1", name: "A Perfect Weekend", level: "A2", language: "en", order: 1, type: "writing", createdAt: new Date().toISOString() },
+  { id: "wr-a2-2", name: "My Dream Vacation House", level: "A2", language: "en", order: 2, type: "writing", createdAt: new Date().toISOString() },
+  { id: "wr-b1-1", name: "Value of Education", level: "B1", language: "en", order: 1, type: "writing", createdAt: new Date().toISOString() },
+  { id: "wr-b1-2", name: "Living a Healthy Lifestyle", level: "B1", language: "en", order: 2, type: "writing", createdAt: new Date().toISOString() },
+  { id: "wr-b2-1", name: "Impact of AI on Jobs", level: "B2", language: "en", order: 1, type: "writing", createdAt: new Date().toISOString() },
+  { id: "wr-b2-2", name: "City Life vs Countryside", level: "B2", language: "en", order: 2, type: "writing", createdAt: new Date().toISOString() },
+  { id: "wr-c1-1", name: "Green Energy Transition", level: "C1", language: "en", order: 1, type: "writing", createdAt: new Date().toISOString() },
+  { id: "wr-c1-2", name: "Media Power & Fake News", level: "C1", language: "en", order: 2, type: "writing", createdAt: new Date().toISOString() },
+  { id: "wr-c2-1", name: "Tech Connectivity & Isolation", level: "C2", language: "en", order: 1, type: "writing", createdAt: new Date().toISOString() },
+  { id: "wr-c2-2", name: "Concept of Global Citizenship", level: "C2", language: "en", order: 2, type: "writing", createdAt: new Date().toISOString() }
+];
+
+const defaultTrainingQuestions: TrainingQuestion[] = [
+  // sp-a1-1 (Introducing Yourself)
+  { id: "sp-q-a1-1-1", topicId: "sp-a1-1", questionText: "What is your name and where are you from? Talk about your hometown.", answerOptions: [], correctAnswerIndex: 0, createdAt: new Date().toISOString() },
+  { id: "sp-q-a1-1-2", topicId: "sp-a1-1", questionText: "Introduce your family members in English. Tell us their names and hobbies.", answerOptions: [], correctAnswerIndex: 0, createdAt: new Date().toISOString() },
+  
+  // sp-a1-2 (My Favorite Hobbies)
+  { id: "sp-q-a1-2-1", topicId: "sp-a1-2", questionText: "What sports or hobbies do you enjoy playing or watching? Why?", answerOptions: [], correctAnswerIndex: 0, createdAt: new Date().toISOString() },
+  { id: "sp-q-a1-2-2", topicId: "sp-a1-2", questionText: "Do you prefer reading books or watching movies in your free time?", answerOptions: [], correctAnswerIndex: 0, createdAt: new Date().toISOString() },
+
+  // sp-a2-1 (My Typical Daily Life)
+  { id: "sp-q-a2-1-1", topicId: "sp-a2-1", questionText: "Describe your morning routine. What is the first thing you do?", answerOptions: [], correctAnswerIndex: 0, createdAt: new Date().toISOString() },
+  { id: "sp-q-a2-1-2", topicId: "sp-a2-1", questionText: "What time do you usually wake up and sleep? How do you feel about your schedule?", answerOptions: [], correctAnswerIndex: 0, createdAt: new Date().toISOString() },
+
+  // sp-a2-2 (Shopping and Foods)
+  { id: "sp-q-a2-2-1", topicId: "sp-a2-2", questionText: "What is your favorite food and how is it made? Explain the main ingredients.", answerOptions: [], correctAnswerIndex: 0, createdAt: new Date().toISOString() },
+  { id: "sp-q-a2-2-2", topicId: "sp-a2-2", questionText: "Do you prefer eating at home or ordering from restaurants? Explain why.", answerOptions: [], correctAnswerIndex: 0, createdAt: new Date().toISOString() },
+
+  // sp-b1-1 (Travel & Exploration)
+  { id: "sp-q-b1-1-1", topicId: "sp-b1-1", questionText: "Talk about a memorable trip you took. Where did you go and who was with you?", answerOptions: [], correctAnswerIndex: 0, createdAt: new Date().toISOString() },
+  { id: "sp-q-b1-1-2", topicId: "sp-b1-1", questionText: "Which country would you love to visit in the future and what would you do there?", answerOptions: [], correctAnswerIndex: 0, createdAt: new Date().toISOString() },
+
+  // sp-b1-2 (Future Career Goals)
+  { id: "sp-q-b1-2-1", topicId: "sp-b1-2", questionText: "What are your big professional or learning goals for the next three years?", answerOptions: [], correctAnswerIndex: 0, createdAt: new Date().toISOString() },
+  { id: "sp-q-b1-2-2", topicId: "sp-b1-2", questionText: "Describe your dream house or ideal living space in detail.", answerOptions: [], correctAnswerIndex: 0, createdAt: new Date().toISOString() },
+
+  // sp-b2-1 (The Digital Age & Internet)
+  { id: "sp-q-b2-1-1", topicId: "sp-b2-1", questionText: "How has the internet and social media changed our daily social relationships?", answerOptions: [], correctAnswerIndex: 0, createdAt: new Date().toISOString() },
+  { id: "sp-q-b2-1-2", topicId: "sp-b2-1", questionText: "Could you live without your smartphone or laptop for a whole week? Why or why not?", answerOptions: [], correctAnswerIndex: 0, createdAt: new Date().toISOString() },
+
+  // sp-b2-2 (Teamwork vs Solo Work)
+  { id: "sp-q-b2-2-1", topicId: "sp-b2-2", questionText: "Is working in teams better than working individually? Discuss with examples.", answerOptions: [], correctAnswerIndex: 0, createdAt: new Date().toISOString() },
+
+  // sp-c1-1 (Solving Climate Change)
+  { id: "sp-q-c1-1-1", topicId: "sp-c1-1", questionText: "How can individuals practically reduce their carbon footprint in their local communities?", answerOptions: [], correctAnswerIndex: 0, createdAt: new Date().toISOString() },
+
+  // sp-c1-2 (The Purpose of Modern Art)
+  { id: "sp-q-c1-2-1", topicId: "sp-c1-2", questionText: "What is the primary role or purpose of art and museums in our high-tech modern society?", answerOptions: [], correctAnswerIndex: 0, createdAt: new Date().toISOString() },
+
+  // sp-c2-1 (Ethics of Artificial Intelligence)
+  { id: "sp-q-c2-1-1", topicId: "sp-c2-1", questionText: "Is artificial intelligence a threat to human creativity, or does it enhance it? Detail your viewpoint.", answerOptions: [], correctAnswerIndex: 0, createdAt: new Date().toISOString() },
+
+  // sp-c2-2 (Globalization and Identity)
+  { id: "sp-q-c2-2-1", topicId: "sp-c2-2", questionText: "How does globalization affect and reshape local cultural heritage and personal identities?", answerOptions: [], correctAnswerIndex: 0, createdAt: new Date().toISOString() },
+
+  // WRITING PROMPTS
+  // wr-a1-1 (My Best Friend)
+  { id: "wr-q-a1-1-1", topicId: "wr-a1-1", questionText: "Write a short paragraph about your best friend. What are their hobbies and how did you meet them?", answerOptions: [], correctAnswerIndex: 0, createdAt: new Date().toISOString() },
+  
+  // wr-a1-2 (My Favorite Season)
+  { id: "wr-q-a1-2-1", topicId: "wr-a1-2", questionText: "Explain why you love a particular season of the year. What activities do you do?", answerOptions: [], correctAnswerIndex: 0, createdAt: new Date().toISOString() },
+
+  // wr-a2-1 (A Perfect Weekend)
+  { id: "wr-q-a2-1-1", topicId: "wr-a2-1", questionText: "Describe your idea of a perfect, relaxing weekend. Where would you go and what would you eat?", answerOptions: [], correctAnswerIndex: 0, createdAt: new Date().toISOString() },
+
+  // wr-a2-2 (My Dream Vacation House)
+  { id: "wr-q-a2-2-1", topicId: "wr-a2-2", questionText: "Write about a dream vacation home. Where would it be located and what features would it have?", answerOptions: [], correctAnswerIndex: 0, createdAt: new Date().toISOString() },
+
+  // wr-b1-1 (Value of Education)
+  { id: "wr-q-b1-1-1", topicId: "wr-b1-1", questionText: "Write a short composition explaining how education changes individual lives and opens opportunities.", answerOptions: [], correctAnswerIndex: 0, createdAt: new Date().toISOString() },
+
+  // wr-b1-2 (Living a Healthy Lifestyle)
+  { id: "wr-q-b1-2-1", topicId: "wr-b1-2", questionText: "Give 3 to 5 practical tips for busy students to stay physically and mentally healthy during exams.", answerOptions: [], correctAnswerIndex: 0, createdAt: new Date().toISOString() },
+
+  // wr-b2-1 (Impact of AI on Jobs)
+  { id: "wr-q-b2-1-1", topicId: "wr-b2-1", questionText: "Discuss the potential impacts of automated AI systems on human jobs. Will they create more than they destroy?", answerOptions: [], correctAnswerIndex: 0, createdAt: new Date().toISOString() },
+
+  // wr-b2-2 (City Life vs Countryside)
+  { id: "wr-q-b2-2-1", topicId: "wr-b2-2", questionText: "Compare the benefits and challenges of raising children in a busy modern city versus a peaceful countryside.", answerOptions: [], correctAnswerIndex: 0, createdAt: new Date().toISOString() },
+
+  // wr-c1-1 (Green Energy Transition)
+  { id: "wr-q-c1-1-1", topicId: "wr-c1-1", questionText: "Write a short essay discussing the primary challenges governments face when transitioning from fossil fuels to clean solar and wind energy.", answerOptions: [], correctAnswerIndex: 0, createdAt: new Date().toISOString() },
+
+  // wr-c1-2 (Media Power & Fake News)
+  { id: "wr-q-c1-2-1", topicId: "wr-c1-2", questionText: "Analyze how digital fake news spreads online. What measures can online readers take to verify stories?", answerOptions: [], correctAnswerIndex: 0, createdAt: new Date().toISOString() },
+
+  // wr-c2-1 (Tech Connectivity & Isolation)
+  { id: "wr-q-c2-1-1", topicId: "wr-c2-1", questionText: "Evaluate the claim that hyper-connectivity via smartphones is causing deep psychological isolation in young adults. Support with critical logic.", answerOptions: [], correctAnswerIndex: 0, createdAt: new Date().toISOString() },
+
+  // wr-c2-2 (Concept of Global Citizenship)
+  { id: "wr-q-c2-2-1", topicId: "wr-c2-2", questionText: "Deconstruct the modern philosophy of 'global citizenship'. Is it a realistic framework for the 21st century or an idealistic concept?", answerOptions: [], correctAnswerIndex: 0, createdAt: new Date().toISOString() }
+];
+
+const defaultTypingSentences: TypingSentence[] = [
+  // English sentences
+  { id: "type-a1-1", sentence: "The cat is sleeping on the warm mat.", level: "A1", language: "en", createdAt: new Date().toISOString() },
+  { id: "type-a1-2", sentence: "I like to drink hot tea in the morning.", level: "A1", language: "en", createdAt: new Date().toISOString() },
+  { id: "type-a1-3", sentence: "They play soccer in the large green park.", level: "A1", language: "en", createdAt: new Date().toISOString() },
+  { id: "type-a2-1", sentence: "She rides her modern bicycle to the university every single day.", level: "A2", language: "en", createdAt: new Date().toISOString() },
+  { id: "type-a2-2", sentence: "We ordered a delicious pepperoni pizza and fresh orange juice.", level: "A2", language: "en", createdAt: new Date().toISOString() },
+  { id: "type-b1-1", sentence: "If you want to achieve your career goals, you must stay incredibly consistent.", level: "B1", language: "en", createdAt: new Date().toISOString() },
+  { id: "type-b1-2", sentence: "Have you ever visited the ancient pyramids located in Cairo, Egypt?", level: "B1", language: "en", createdAt: new Date().toISOString() },
+  { id: "type-b2-1", sentence: "Despite the heavy rain, the enthusiastic spectators remained in the stadium.", level: "B2", language: "en", createdAt: new Date().toISOString() },
+  { id: "type-b2-2", sentence: "The technological paradigm shift has completely revolutionized modern business.", level: "B2", language: "en", createdAt: new Date().toISOString() },
+  { id: "type-c1-1", sentence: "Her impeccable speech left a profound, lasting impression on the distinguished audience.", level: "C1", language: "en", createdAt: new Date().toISOString() },
+  { id: "type-c1-2", sentence: "An astronomical rise in global temperatures demands immediate and concerted international action.", level: "C1", language: "en", createdAt: new Date().toISOString() },
+  { id: "type-c2-1", sentence: "The ephemeral nature of aesthetic perfection is a quintessential theme in classical philosophy.", level: "C2", language: "en", createdAt: new Date().toISOString() },
+  { id: "type-c2-2", sentence: "An obfuscation of historical truths inevitably leads to systemic misinterpretation of modern events.", level: "C2", language: "en", createdAt: new Date().toISOString() },
+
+  // Arabic sentences
+  { id: "type-ar-a1-1", sentence: "الولد يقرأ كتابا مفيدا جدا في غرفته.", level: "A1", language: "ar", createdAt: new Date().toISOString() },
+  { id: "type-ar-a2-1", sentence: "يستيقظ المعلم باكرا ليذهب إلى المدرسة بنشاط كبير.", level: "A2", language: "ar", createdAt: new Date().toISOString() },
+  { id: "type-ar-b1-1", sentence: "إذا أردت النجاح في حياتك، يجب عليك المثابرة والعمل بجد يوميا.", level: "B1", language: "ar", createdAt: new Date().toISOString() },
+  { id: "type-ar-b2-1", sentence: "على الرغم من صعوبة الامتحان، استطاع الطلاب المتميزون تحقيق درجات ممتازة.", level: "B2", language: "ar", createdAt: new Date().toISOString() },
+  { id: "type-ar-c1-1", sentence: "إن ثورة الاتصالات الحديثة قد ساهمت بشكل جذري في تقارب الشعوب واختصار المسافات.", level: "C1", language: "ar", createdAt: new Date().toISOString() },
+  { id: "type-ar-c2-1", sentence: "تتجلى عبقرية الفلسفة الكلاسيكية في تفكيك ثنائية الوجود والعدم وصياغة مفاهيم الميتافيزيقا.", level: "C2", language: "ar", createdAt: new Date().toISOString() }
+];
+
+export async function getTrainingTopics(teacherId?: string): Promise<TrainingTopic[]> {
+  const tid = teacherId || "teacher-sarah";
+  const localKey = `ep_training_topics_${tid}`;
+  const cached = getLocal<TrainingTopic[]>(localKey, []);
+  if (db) {
+    try {
+      const snap = await getDocs(collection(db, "teachers", tid, "training_topics"));
+      const list: TrainingTopic[] = [];
+      snap.forEach((dSnap) => {
+        list.push(dSnap.data() as TrainingTopic);
+      });
+      if (list.length > 0) {
+        setLocal(localKey, list);
+        return list;
+      } else {
+        // Seed
+        for (const item of defaultTrainingTopics) {
+          await setDoc(doc(db, "teachers", tid, "training_topics", item.id), item);
+        }
+        setLocal(localKey, defaultTrainingTopics);
+        return defaultTrainingTopics;
+      }
+    } catch (e) {
+      console.warn(`Firestore getTrainingTopics failed for teacher ${tid}, using cache:`, e);
+    }
+  }
+  return cached.length > 0 ? cached : defaultTrainingTopics;
+}
+
+export async function saveTrainingTopic(topic: TrainingTopic, teacherId?: string): Promise<void> {
+  const tid = teacherId || "teacher-sarah";
+  const localKey = `ep_training_topics_${tid}`;
+  const current = await getTrainingTopics(tid);
+  const updated = current.some(x => x.id === topic.id)
+    ? current.map(x => x.id === topic.id ? topic : x)
+    : [...current, topic];
+  setLocal(localKey, updated);
+
+  if (db) {
+    try {
+      await setDoc(doc(db, "teachers", tid, "training_topics", topic.id), topic);
+    } catch (e) {
+      console.warn("Firestore saveTrainingTopic failed:", e);
+    }
+  }
+}
+
+export async function deleteTrainingTopic(id: string, teacherId?: string): Promise<void> {
+  const tid = teacherId || "teacher-sarah";
+  const localKey = `ep_training_topics_${tid}`;
+  const current = await getTrainingTopics(tid);
+  const updated = current.filter(x => x.id !== id);
+  setLocal(localKey, updated);
+
+  if (db) {
+    try {
+      await deleteDoc(doc(db, "teachers", tid, "training_topics", id));
+      // Also delete related questions
+      const questionsSnap = await getDocs(query(collection(db, "teachers", tid, "training_questions"), where("topicId", "==", id)));
+      for (const d of questionsSnap.docs) {
+        await deleteDoc(doc(db, "teachers", tid, "training_questions", d.id));
+      }
+    } catch (e) {
+      console.warn("Firestore deleteTrainingTopic failed:", e);
+    }
+  }
+}
+
+export async function getTrainingQuestions(teacherId?: string): Promise<TrainingQuestion[]> {
+  const tid = teacherId || "teacher-sarah";
+  const localKey = `ep_training_questions_${tid}`;
+  const cached = getLocal<TrainingQuestion[]>(localKey, []);
+  if (db) {
+    try {
+      const snap = await getDocs(collection(db, "teachers", tid, "training_questions"));
+      const list: TrainingQuestion[] = [];
+      snap.forEach((dSnap) => {
+        list.push(dSnap.data() as TrainingQuestion);
+      });
+      if (list.length > 0) {
+        setLocal(localKey, list);
+        return list;
+      } else {
+        // Seed
+        for (const item of defaultTrainingQuestions) {
+          await setDoc(doc(db, "teachers", tid, "training_questions", item.id), item);
+        }
+        setLocal(localKey, defaultTrainingQuestions);
+        return defaultTrainingQuestions;
+      }
+    } catch (e) {
+      console.warn(`Firestore getTrainingQuestions failed for teacher ${tid}, using cache:`, e);
+    }
+  }
+  return cached.length > 0 ? cached : defaultTrainingQuestions;
+}
+
+export async function saveTrainingQuestion(question: TrainingQuestion, teacherId?: string): Promise<void> {
+  const tid = teacherId || "teacher-sarah";
+  const localKey = `ep_training_questions_${tid}`;
+  const current = await getTrainingQuestions(tid);
+  const updated = current.some(x => x.id === question.id)
+    ? current.map(x => x.id === question.id ? question : x)
+    : [...current, question];
+  setLocal(localKey, updated);
+
+  if (db) {
+    try {
+      await setDoc(doc(db, "teachers", tid, "training_questions", question.id), question);
+    } catch (e) {
+      console.warn("Firestore saveTrainingQuestion failed:", e);
+    }
+  }
+}
+
+export async function deleteTrainingQuestion(id: string, teacherId?: string): Promise<void> {
+  const tid = teacherId || "teacher-sarah";
+  const localKey = `ep_training_questions_${tid}`;
+  const current = await getTrainingQuestions(tid);
+  const updated = current.filter(x => x.id !== id);
+  setLocal(localKey, updated);
+
+  if (db) {
+    try {
+      await deleteDoc(doc(db, "teachers", tid, "training_questions", id));
+    } catch (e) {
+      console.warn("Firestore deleteTrainingQuestion failed:", e);
+    }
+  }
+}
+
+export async function getTypingSentences(teacherId?: string): Promise<TypingSentence[]> {
+  const tid = teacherId || "teacher-sarah";
+  const localKey = `ep_typing_sentences_${tid}`;
+  const cached = getLocal<TypingSentence[]>(localKey, []);
+  if (db) {
+    try {
+      const snap = await getDocs(collection(db, "teachers", tid, "typing_sentences"));
+      const list: TypingSentence[] = [];
+      snap.forEach((dSnap) => {
+        list.push(dSnap.data() as TypingSentence);
+      });
+      if (list.length > 0) {
+        setLocal(localKey, list);
+        return list;
+      } else {
+        // Seed
+        for (const item of defaultTypingSentences) {
+          await setDoc(doc(db, "teachers", tid, "typing_sentences", item.id), item);
+        }
+        setLocal(localKey, defaultTypingSentences);
+        return defaultTypingSentences;
+      }
+    } catch (e) {
+      console.warn(`Firestore getTypingSentences failed for teacher ${tid}, using cache:`, e);
+    }
+  }
+  return cached.length > 0 ? cached : defaultTypingSentences;
+}
+
+export async function saveTypingSentence(sentence: TypingSentence, teacherId?: string): Promise<void> {
+  const tid = teacherId || "teacher-sarah";
+  const localKey = `ep_typing_sentences_${tid}`;
+  const current = await getTypingSentences(tid);
+  const updated = current.some(x => x.id === sentence.id)
+    ? current.map(x => x.id === sentence.id ? sentence : x)
+    : [...current, sentence];
+  setLocal(localKey, updated);
+
+  if (db) {
+    try {
+      await setDoc(doc(db, "teachers", tid, "typing_sentences", sentence.id), sentence);
+    } catch (e) {
+      console.warn("Firestore saveTypingSentence failed:", e);
+    }
+  }
+}
+
+export async function deleteTypingSentence(id: string, teacherId?: string): Promise<void> {
+  const tid = teacherId || "teacher-sarah";
+  const localKey = `ep_typing_sentences_${tid}`;
+  const current = await getTypingSentences(tid);
+  const updated = current.filter(x => x.id !== id);
+  setLocal(localKey, updated);
+
+  if (db) {
+    try {
+      await deleteDoc(doc(db, "teachers", tid, "typing_sentences", id));
+    } catch (e) {
+      console.warn("Firestore deleteTypingSentence failed:", e);
+    }
+  }
+}
+
+// ================= RECORDED LESSONS SERVICE =================
+
+const RECORDED_KEY = "ep_recorded_lessons";
+
+const defaultRecordedLessons: RecordedLesson[] = [
+  {
+    id: "rec-1",
+    title: "مقدمة في قواعد اللغة الإنجليزية التأسيسية",
+    topic: "English Grammar Basics",
+    level: "A1",
+    order: 1,
+    videoUrl: "https://www.youtube.com/watch?v=j_N6t_y68-s",
+    createdAt: new Date().toISOString()
+  },
+  {
+    id: "rec-2",
+    title: "كيف تتحدث كالمحترفين - تحسين مهارات التحدث",
+    topic: "Speaking and Pronunciation Masterclass",
+    level: "A2",
+    order: 2,
+    videoUrl: "https://www.youtube.com/watch?v=L99X-mO9t_c",
+    createdAt: new Date().toISOString()
+  },
+  {
+    id: "rec-3",
+    title: "خطوات كتابة مقال احترافي خالي من الأخطاء",
+    topic: "Writing and Paragraph Structure",
+    level: "B1",
+    order: 1,
+    videoUrl: "https://www.youtube.com/watch?v=mD_sYp97Vsk",
+    createdAt: new Date().toISOString()
+  }
+];
+
+export async function getRecordedLessons(teacherId?: string): Promise<RecordedLesson[]> {
+  const tid = teacherId || "teacher-sarah";
+  const localKey = `ep_recorded_lessons_${tid}`;
+  const cached = getLocal<RecordedLesson[]>(localKey, []);
+  if (db) {
+    try {
+      const snap = await getDocs(collection(db, "teachers", tid, "recorded_lessons"));
+      const list: RecordedLesson[] = [];
+      snap.forEach((dSnap) => {
+        list.push(dSnap.data() as RecordedLesson);
+      });
+      if (list.length > 0) {
+        list.sort((a, b) => a.order - b.order);
+        setLocal(localKey, list);
+        return list;
+      } else {
+        // Seed
+        for (const item of defaultRecordedLessons) {
+          await setDoc(doc(db, "teachers", tid, "recorded_lessons", item.id), item);
+        }
+        setLocal(localKey, defaultRecordedLessons);
+        return defaultRecordedLessons;
+      }
+    } catch (e) {
+      console.warn(`Firestore getRecordedLessons failed for teacher ${tid}, using cache:`, e);
+    }
+  }
+  return cached.length > 0 ? cached : defaultRecordedLessons;
+}
+
+export function subscribeToRecordedLessons(callback: (lessons: RecordedLesson[]) => void, teacherId?: string): () => void {
+  const tid = teacherId || "teacher-sarah";
+  const localKey = `ep_recorded_lessons_${tid}`;
+  if (db) {
+    try {
+      return onSnapshot(collection(db, "teachers", tid, "recorded_lessons"), (snap) => {
+        const list: RecordedLesson[] = [];
+        snap.forEach((docSnap) => {
+          list.push(docSnap.data() as RecordedLesson);
+        });
+        list.sort((a, b) => a.order - b.order);
+        setLocal(localKey, list);
+        callback(list);
+      }, (err) => {
+        console.warn("Firestore subscribeToRecordedLessons failed, using cache:", err);
+        callback(getLocal<RecordedLesson[]>(localKey, defaultRecordedLessons));
+      });
+    } catch (e) {
+      console.warn("Firestore subscribeToRecordedLessons setup failed:", e);
+    }
+  }
+  callback(getLocal<RecordedLesson[]>(localKey, defaultRecordedLessons));
+  return () => {};
+}
+
+export async function saveRecordedLesson(lesson: RecordedLesson, teacherId?: string): Promise<void> {
+  const tid = teacherId || "teacher-sarah";
+  const localKey = `ep_recorded_lessons_${tid}`;
+  const current = await getRecordedLessons(tid);
+  const updated = current.some(x => x.id === lesson.id)
+    ? current.map(x => x.id === lesson.id ? lesson : x)
+    : [...current, lesson];
+  updated.sort((a, b) => a.order - b.order);
+  setLocal(localKey, updated);
+
+  if (db) {
+    try {
+      await setDoc(doc(db, "teachers", tid, "recorded_lessons", lesson.id), lesson);
+    } catch (e) {
+      console.warn("Firestore saveRecordedLesson failed:", e);
+    }
+  }
+}
+
+export async function deleteRecordedLesson(id: string, teacherId?: string): Promise<void> {
+  const tid = teacherId || "teacher-sarah";
+  const localKey = `ep_recorded_lessons_${tid}`;
+  const current = await getRecordedLessons(tid);
+  const updated = current.filter(x => x.id !== id);
+  setLocal(localKey, updated);
+
+  if (db) {
+    try {
+      await deleteDoc(doc(db, "teachers", tid, "recorded_lessons", id));
+    } catch (e) {
+      console.warn("Firestore deleteRecordedLesson failed:", e);
+    }
+  }
+}
+
+// ================= LIBRARY QUESTION GAME OPERATIONS =================
+
+const defaultLibraryBooks: LibraryBook[] = [
+  {
+    id: "lib-book-1",
+    teacherId: "teacher-sarah",
+    bookNumber: 1,
+    coverColor: "from-blue-600 to-indigo-700",
+    questionText: "Which sentence is grammatically correct?",
+    options: [
+      "She do not like tea.",
+      "She don't like tea.",
+      "She doesn't likes tea.",
+      "She doesn't like tea."
+    ],
+    correctOptionIndex: 3,
+    createdAt: new Date().toISOString()
+  },
+  {
+    id: "lib-book-2",
+    teacherId: "teacher-sarah",
+    bookNumber: 2,
+    coverColor: "from-rose-600 to-red-700",
+    questionText: "What is the past participle of the verb 'go'?",
+    options: [
+      "Went",
+      "Going",
+      "Gone",
+      "Goes"
+    ],
+    correctOptionIndex: 2,
+    createdAt: new Date().toISOString()
+  },
+  {
+    id: "lib-book-3",
+    teacherId: "teacher-sarah",
+    bookNumber: 3,
+    coverColor: "from-emerald-600 to-teal-700",
+    questionText: "Choose the correct spelling:",
+    options: [
+      "Necessary",
+      "Neccessary",
+      "Necassary",
+      "Necessery"
+    ],
+    correctOptionIndex: 0,
+    createdAt: new Date().toISOString()
+  },
+  {
+    id: "lib-book-4",
+    teacherId: "teacher-sarah",
+    bookNumber: 4,
+    coverColor: "from-amber-600 to-orange-700",
+    questionText: "Which word is a synonym of 'furious'?",
+    options: [
+      "Calm",
+      "Very angry",
+      "Happy",
+      "Tired"
+    ],
+    correctOptionIndex: 1,
+    createdAt: new Date().toISOString()
+  },
+  {
+    id: "lib-book-5",
+    teacherId: "teacher-sarah",
+    bookNumber: 5,
+    coverColor: "from-purple-600 to-fuchsia-700",
+    questionText: "Complete the conditional: 'If I ___ more time, I would learn French.'",
+    options: [
+      "have",
+      "had",
+      "would have",
+      "will have"
+    ],
+    correctOptionIndex: 1,
+    createdAt: new Date().toISOString()
+  },
+  {
+    id: "lib-book-6",
+    teacherId: "teacher-sarah",
+    bookNumber: 6,
+    coverColor: "from-cyan-600 to-blue-700",
+    questionText: "Identify the noun in this sentence: 'The beautiful cat slept soundly.'",
+    options: [
+      "beautiful",
+      "cat",
+      "slept",
+      "soundly"
+    ],
+    correctOptionIndex: 1,
+    createdAt: new Date().toISOString()
+  }
+];
+
+export async function getLibraryBooks(teacherId?: string): Promise<LibraryBook[]> {
+  const tid = teacherId || "teacher-sarah";
+  const localKey = `ep_library_books_${tid}`;
+  const cached = getLocal<LibraryBook[]>(localKey, []);
+  if (db) {
+    try {
+      const snap = await getDocs(collection(db, "teachers", tid, "library_books"));
+      const list: LibraryBook[] = [];
+      snap.forEach((dSnap) => {
+        list.push(dSnap.data() as LibraryBook);
+      });
+      if (list.length > 0) {
+        list.sort((a, b) => a.bookNumber - b.bookNumber);
+        setLocal(localKey, list);
+        return list;
+      } else {
+        // Seed
+        for (const item of defaultLibraryBooks) {
+          const seededItem = { ...item, teacherId: tid };
+          await setDoc(doc(db, "teachers", tid, "library_books", seededItem.id), seededItem);
+        }
+        setLocal(localKey, defaultLibraryBooks);
+        return defaultLibraryBooks;
+      }
+    } catch (e) {
+      console.warn(`Firestore getLibraryBooks failed for teacher ${tid}, using cache:`, e);
+    }
+  }
+  return cached.length > 0 ? cached : defaultLibraryBooks;
+}
+
+export function subscribeToLibraryBooks(callback: (books: LibraryBook[]) => void, teacherId?: string): () => void {
+  const tid = teacherId || "teacher-sarah";
+  const localKey = `ep_library_books_${tid}`;
+  if (db) {
+    try {
+      return onSnapshot(collection(db, "teachers", tid, "library_books"), (snap) => {
+        const list: LibraryBook[] = [];
+        snap.forEach((docSnap) => {
+          list.push(docSnap.data() as LibraryBook);
+        });
+        list.sort((a, b) => a.bookNumber - b.bookNumber);
+        setLocal(localKey, list);
+        callback(list);
+      }, (err) => {
+        console.warn("Firestore subscribeToLibraryBooks failed, using cache:", err);
+        callback(getLocal<LibraryBook[]>(localKey, defaultLibraryBooks));
+      });
+    } catch (e) {
+      console.warn("Firestore subscribeToLibraryBooks setup failed:", e);
+    }
+  }
+  callback(getLocal<LibraryBook[]>(localKey, defaultLibraryBooks));
+  return () => {};
+}
+
+export async function saveLibraryBook(book: LibraryBook, teacherId?: string): Promise<void> {
+  const tid = teacherId || "teacher-sarah";
+  const localKey = `ep_library_books_${tid}`;
+  const current = await getLibraryBooks(tid);
+  const updated = current.some(x => x.id === book.id)
+    ? current.map(x => x.id === book.id ? book : x)
+    : [...current, book];
+  updated.sort((a, b) => a.bookNumber - b.bookNumber);
+  setLocal(localKey, updated);
+
+  if (db) {
+    try {
+      await setDoc(doc(db, "teachers", tid, "library_books", book.id), book);
+    } catch (e) {
+      console.warn("Firestore saveLibraryBook failed:", e);
+    }
+  }
+}
+
+export async function deleteLibraryBook(id: string, teacherId?: string): Promise<void> {
+  const tid = teacherId || "teacher-sarah";
+  const localKey = `ep_library_books_${tid}`;
+  const current = await getLibraryBooks(tid);
+  const updated = current.filter(x => x.id !== id);
+  setLocal(localKey, updated);
+
+  if (db) {
+    try {
+      await deleteDoc(doc(db, "teachers", tid, "library_books", id));
+    } catch (e) {
+      console.warn("Firestore deleteLibraryBook failed:", e);
+    }
+  }
+}
+
+
+
+

@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import { Student, Lesson, Vocabulary } from "../types";
-import { Award, BookOpen, Star, Flame, Calendar, Clock, Smile, Trash2, ArrowRight } from "lucide-react";
+import { Award, BookOpen, Star, Flame, Calendar, Clock, Smile, Trash2, ArrowRight, Play, Square, Activity, Percent } from "lucide-react";
 
 interface ProfileSectionProps {
   student: Student | null;
@@ -9,6 +9,11 @@ interface ProfileSectionProps {
   vocabulary: Vocabulary[];
   isArabic: boolean;
   onOpenAuth: () => void;
+  isStudying?: boolean;
+  setIsStudying?: (val: boolean) => void;
+  studyElapsedSeconds?: number;
+  setStudyElapsedSeconds?: (val: number) => void;
+  formatDuration?: (secs: number) => string;
 }
 
 export default function ProfileSection({
@@ -18,6 +23,11 @@ export default function ProfileSection({
   vocabulary,
   isArabic,
   onOpenAuth,
+  isStudying,
+  setIsStudying,
+  studyElapsedSeconds,
+  setStudyElapsedSeconds,
+  formatDuration,
 }: ProfileSectionProps) {
   
   if (!student) {
@@ -47,6 +57,63 @@ export default function ProfileSection({
       </div>
     );
   }
+
+  // Local fallback states in case they are not passed from parent
+  const [localIsStudying, setLocalIsStudying] = useState(false);
+  const [localStudySeconds, setLocalStudySeconds] = useState(0);
+  
+  const activeIsStudying = isStudying !== undefined ? isStudying : localIsStudying;
+  const activeStudySeconds = studyElapsedSeconds !== undefined ? studyElapsedSeconds : localStudySeconds;
+  
+  // Local timer effect in case parent doesn't provide it
+  React.useEffect(() => {
+    let interval: any = null;
+    if (isStudying === undefined && localIsStudying) {
+      interval = setInterval(() => {
+        setLocalStudySeconds(p => p + 1);
+      }, 1000);
+    }
+    return () => clearInterval(interval);
+  }, [localIsStudying, isStudying]);
+
+  const handleToggleStudy = async () => {
+    if (student) {
+      if (activeIsStudying) {
+        if (setIsStudying) setIsStudying(false);
+        else setLocalIsStudying(false);
+        
+        const added = activeStudySeconds;
+        if (setStudyElapsedSeconds) setStudyElapsedSeconds(0);
+        else setLocalStudySeconds(0);
+        
+        const updated = {
+          ...student,
+          studySecondsToday: (student.studySecondsToday || 0) + added,
+          studySecondsThisWeek: (student.studySecondsThisWeek || 0) + added,
+          studySecondsTotal: (student.studySecondsTotal || 0) + added,
+        };
+        await onUpdateStudent(updated);
+      } else {
+        if (setIsStudying) setIsStudying(true);
+        else {
+          setLocalStudySeconds(0);
+          setLocalIsStudying(true);
+        }
+        if (setStudyElapsedSeconds) setStudyElapsedSeconds(0);
+      }
+    }
+  };
+
+  const formatTimeLocal = (totalSeconds: number) => {
+    const h = Math.floor(totalSeconds / 3600);
+    const m = Math.floor((totalSeconds % 3600) / 60);
+    const s = totalSeconds % 60;
+    const pad = (v: number) => String(v).padStart(2, "0");
+    if (h > 0) {
+      return `${pad(h)}:${pad(m)}:${pad(s)}`;
+    }
+    return `${pad(m)}:${pad(s)}`;
+  };
 
   // Get list of saved words objects
   const savedWordsList = vocabulary.filter(v => student.savedWords.includes(v.id));
@@ -102,35 +169,25 @@ export default function ProfileSection({
                 {student.email}
               </p>
 
-              {/* Level Selector */}
-              <div className="flex items-center gap-1.5 justify-center md:justify-start">
-                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
-                  {isArabic ? "مستوى اللغة:" : "Proficiency Level:"}
-                </span>
-                <select
-                  value={student.level}
-                  onChange={(e) => handleLevelChange(e.target.value as any)}
-                  className="bg-slate-100 border-none outline-none rounded-md px-2.5 py-1 text-xs font-semibold text-slate-700 focus:ring-2 focus:ring-indigo-500"
-                >
-                  {((["A1", "A2", "B1", "B2", "C1", "C2"] as const).filter(lvl => {
-                    const isUnlocked = student.unlockedLevels?.includes(lvl) ?? (lvl === "A1" || lvl === student.level);
-                    return isUnlocked;
-                  })).map((lvl) => {
-                    const labels = {
-                      A1: isArabic ? "A1 (مبتدئ)" : "A1 (Beginner)",
-                      A2: isArabic ? "A2 (مبتدئ متقدم)" : "A2 (Elementary)",
-                      B1: isArabic ? "B1 (متوسط)" : "B1 (Intermediate)",
-                      B2: isArabic ? "B2 (فوق المتوسط)" : "B2 (Upper Intermediate)",
-                      C1: isArabic ? "C1 (متقدم)" : "C1 (Advanced)",
-                      C2: isArabic ? "C2 (متقن)" : "C2 (Mastery)",
-                    };
-                    return (
-                      <option key={lvl} value={lvl}>
-                        {labels[lvl]}
-                      </option>
-                    );
-                  })}
-                </select>
+              {/* Level Display */}
+              <div className="flex flex-col sm:flex-row sm:items-center gap-1.5 sm:gap-3 justify-center md:justify-start">
+                <div className="flex items-center gap-1.5 justify-center md:justify-start">
+                  <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+                    {isArabic ? "مستوى اللغة الحالي:" : "Current Level:"}
+                  </span>
+                  <span className="bg-indigo-50 text-indigo-700 text-xs font-extrabold px-2.5 py-1 rounded-lg border border-indigo-100 font-mono">
+                    {student.level}
+                  </span>
+                </div>
+
+                <div className="flex items-center gap-1.5 justify-center md:justify-start">
+                  <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+                    {isArabic ? "الأستاذ الحالي:" : "Current Teacher:"}
+                  </span>
+                  <span className="bg-emerald-50 text-emerald-700 text-xs font-extrabold px-2.5 py-1 rounded-lg border border-emerald-100">
+                    {student.selectedTeacherName || "Sarah / سارة"}
+                  </span>
+                </div>
               </div>
             </div>
           </div>
@@ -155,53 +212,65 @@ export default function ProfileSection({
       </div>
 
       {/* Statistics Block Grid */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 sm:gap-6">
-        <div className="bg-white border border-slate-200 rounded-2xl p-5 text-center shadow-sm relative overflow-hidden group">
-          <div className="w-10 h-10 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center mx-auto mb-3">
-            <BookOpen className="w-5 h-5" />
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+        {/* 1. Daily Streak */}
+        <div className="bg-white border border-slate-200 rounded-2xl p-4 text-center shadow-sm relative overflow-hidden group flex flex-col justify-between min-h-[140px]">
+          <div className="w-9 h-9 rounded-xl bg-orange-50 text-orange-600 flex items-center justify-center mx-auto mb-2">
+            <Flame className="w-4.5 h-4.5" />
           </div>
-          <span className="block text-2xl font-black font-display text-slate-800 font-mono">
-            {student.completedLessons.length}
-          </span>
-          <p className="text-xs font-semibold text-slate-500 mt-0.5">
-            {isArabic ? "الدروس المكتملة" : "Completed Lessons"}
-          </p>
+          <div>
+            <span className="block text-xl font-black font-display text-slate-800 font-mono">
+              {student.dailyStreak} {isArabic ? "أيام" : "Days"}
+            </span>
+            <p className="text-[10px] font-bold text-slate-400 mt-1 uppercase tracking-wider">
+              {isArabic ? "الأيام المتتالية" : "Daily Streak"}
+            </p>
+          </div>
         </div>
 
-        <div className="bg-white border border-slate-200 rounded-2xl p-5 text-center shadow-sm relative overflow-hidden group">
-          <div className="w-10 h-10 rounded-xl bg-teal-50 text-teal-600 flex items-center justify-center mx-auto mb-3">
-            <Star className="w-5 h-5" />
+        {/* 2. Saved Vocabulary */}
+        <div className="bg-white border border-slate-200 rounded-2xl p-4 text-center shadow-sm relative overflow-hidden group flex flex-col justify-between min-h-[140px]">
+          <div className="w-9 h-9 rounded-xl bg-teal-50 text-teal-600 flex items-center justify-center mx-auto mb-2">
+            <Star className="w-4.5 h-4.5" />
           </div>
-          <span className="block text-2xl font-black font-display text-slate-800 font-mono">
-            {student.savedWords.length}
-          </span>
-          <p className="text-xs font-semibold text-slate-500 mt-0.5">
-            {isArabic ? "الكلمات المحفوظة" : "Saved Vocabulary"}
-          </p>
+          <div>
+            <span className="block text-xl font-black font-display text-slate-800 font-mono">
+              {student.savedWords.length}
+            </span>
+            <p className="text-[10px] font-bold text-slate-400 mt-1 uppercase tracking-wider">
+              {isArabic ? "الكلمات المحفوظة" : "Saved Vocabulary"}
+            </p>
+          </div>
         </div>
 
-        <div className="bg-white border border-slate-200 rounded-2xl p-5 text-center shadow-sm relative overflow-hidden group">
-          <div className="w-10 h-10 rounded-xl bg-orange-50 text-orange-600 flex items-center justify-center mx-auto mb-3">
-            <Flame className="w-5 h-5" />
+        {/* 3. Completed Lessons */}
+        <div className="bg-white border border-slate-200 rounded-2xl p-4 text-center shadow-sm relative overflow-hidden group flex flex-col justify-between min-h-[140px]">
+          <div className="w-9 h-9 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center mx-auto mb-2">
+            <BookOpen className="w-4.5 h-4.5" />
           </div>
-          <span className="block text-2xl font-black font-display text-slate-800 font-mono">
-            {student.dailyStreak} {isArabic ? "أيام" : "Days"}
-          </span>
-          <p className="text-xs font-semibold text-slate-500 mt-0.5">
-            {isArabic ? "الأيام المتتالية" : "Daily Streak"}
-          </p>
+          <div>
+            <span className="block text-xl font-black font-display text-slate-800 font-mono">
+              {student.completedLessons.length}
+            </span>
+            <p className="text-[10px] font-bold text-slate-400 mt-1 uppercase tracking-wider">
+              {isArabic ? "الدروس المكتملة" : "Completed Lessons"}
+            </p>
+          </div>
         </div>
 
-        <div className="bg-white border border-slate-200 rounded-2xl p-5 text-center shadow-sm relative overflow-hidden group">
-          <div className="w-10 h-10 rounded-xl bg-yellow-50 text-yellow-600 flex items-center justify-center mx-auto mb-3">
-            <Award className="w-5 h-5" />
+        {/* 4. Total Progress */}
+        <div className="bg-white border border-slate-200 rounded-2xl p-4 text-center shadow-sm relative overflow-hidden group flex flex-col justify-between min-h-[140px]">
+          <div className="w-9 h-9 rounded-xl bg-pink-50 text-pink-600 flex items-center justify-center mx-auto mb-2">
+            <Percent className="w-4.5 h-4.5" />
           </div>
-          <span className="block text-2xl font-black font-display text-slate-800 font-mono">
-            {student.points}
-          </span>
-          <p className="text-xs font-semibold text-slate-500 mt-0.5">
-            {isArabic ? "نقاط التعلم" : "Pathway Points"}
-          </p>
+          <div>
+            <span className="block text-xl font-black font-display text-slate-800 font-mono">
+              {student.progress}%
+            </span>
+            <p className="text-[10px] font-bold text-slate-400 mt-1 uppercase tracking-wider">
+              {isArabic ? "نسبة التقدم الكلي" : "Total Progress"}
+            </p>
+          </div>
         </div>
       </div>
 
@@ -301,23 +370,6 @@ export default function ProfileSection({
             </div>
           )}
         </div>
-      </div>
-
-      {/* Active sessions history log */}
-      <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4 flex flex-col md:flex-row justify-between items-center gap-4">
-        <div className="flex items-center gap-2 text-left rtl:text-right">
-          <Clock className="w-4 h-4 text-slate-400" />
-          <span className="text-xs text-slate-500 font-medium">
-            {isArabic ? "تاريخ آخر نشاط للمزامنة:" : "Last Account Synced Time:"}
-          </span>
-          <span className="text-xs text-slate-600 font-bold font-mono">
-            {formatDate(student.lastActive)}
-          </span>
-        </div>
-
-        <span className="text-[10px] font-mono text-slate-400">
-          User ID: {student.uid.slice(0, 14)}...
-        </span>
       </div>
     </div>
   );
